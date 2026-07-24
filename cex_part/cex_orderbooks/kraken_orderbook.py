@@ -116,10 +116,19 @@ class KrakenOrderBookManager:
                             continue
 
                         if msg.get("method") == "subscribe":
-                            log.debug(
-                                "Kraken sub ack shard=%d success=%s",
-                                shard_id, msg.get("success"),
-                            )
+                            # A rejected subscription is silent otherwise —
+                            # surface it (WARNING) so altname/wsname
+                            # mismatches don't just quietly drop a symbol.
+                            if msg.get("success") is False:
+                                log.warning(
+                                    "Kraken subscribe rejected shard=%d: %s",
+                                    shard_id, msg,
+                                )
+                            else:
+                                log.debug(
+                                    "Kraken sub ack shard=%d success=%s",
+                                    shard_id, msg.get("success"),
+                                )
                             continue
 
                         channel = msg.get("channel")

@@ -1,6 +1,7 @@
 import asyncio
 
 from engine.logger import get_logger
+from engine.tasks import spawn
 
 from .cache_manager import apply_coingecko_metadata, cleanup_kraken_pending, init_cache
 from .cex_orderbooks.bybit_orderbook import BybitOrderBookManager
@@ -52,19 +53,28 @@ async def start_cex() -> None:
     await cleanup_kraken_pending()
 
     bybit_wss = BybitOrderBookManager()
-    asyncio.create_task(bybit_wss.connect())
+    spawn(bybit_wss.connect(), name="bybit_ws")
 
     kraken_wss = KrakenOrderBookManager()
-    asyncio.create_task(kraken_wss.connect())
+    spawn(kraken_wss.connect(), name="kraken_ws")
 
-    await bybit_wss.ready.wait()
-    await kraken_wss.ready.wait()
+    # Don't let a slow/down exchange block the entire system's startup —
+    # wait with a timeout and continue if one isn't ready. Its manager
+    # keeps trying to connect in the background either way.
+    for name, mgr in (("bybit", bybit_wss), ("kraken", kraken_wss)):
+        try:
+            await asyncio.wait_for(mgr.ready.wait(), timeout=60)
+        except asyncio.TimeoutError:
+            log.warning(
+                "%s orderbook not ready after 60s — continuing; it will "
+                "connect in the background", name,
+            )
 
     log.info("orderbook managers ready")
     await init_kraken_symbols(kraken_wss)
 
-    asyncio.create_task(run_bybit(bybit_wss))
-    asyncio.create_task(run_gate())
-    asyncio.create_task(run_kraken(kraken_wss))
-    asyncio.create_task(_dex_pool_loop())
+    spawn(run_bybit(bybit_wss), name="run_bybit")
+    spawn(run_gate(), name="run_gate")
+    spawn(run_kraken(kraken_wss), name="run_kraken")
+    spawn(_dex_pool_loop(), name="dex_pool_loop")
     log.info("CEX online")

@@ -29,6 +29,7 @@ from dex_part.main import start_dex  # noqa: E402
 from engine import coingecko, liquidity_filter  # noqa: E402
 from engine.diagnostics import price_store_dumper  # noqa: E402
 from engine.spread_logic import spread_runner  # noqa: E402
+from engine.tasks import spawn  # noqa: E402
 
 
 async def main() -> None:
@@ -47,30 +48,31 @@ async def main() -> None:
     await start_cex()
 
     log.info("orchestrator: starting DEX")
-    asyncio.create_task(start_dex())
+    spawn(start_dex(), name="dex")
 
     log.info(
         "orchestrator: starting spread runner (interval=%ss min_pct=%s)",
         SPREAD_INTERVAL, SPREAD_MIN_PCT,
     )
-    asyncio.create_task(
-        spread_runner(interval=SPREAD_INTERVAL, min_spread_pct=SPREAD_MIN_PCT)
+    spawn(
+        spread_runner(interval=SPREAD_INTERVAL, min_spread_pct=SPREAD_MIN_PCT),
+        name="spread_runner",
     )
 
-    asyncio.create_task(price_store_dumper(PRICE_STORE_DUMP_INTERVAL))
-    asyncio.create_task(pool_refresh_loop(POOL_REFRESH_INTERVAL))
-    asyncio.create_task(coingecko.refresh_loop(COINGECKO_REFRESH_INTERVAL))
-    asyncio.create_task(coingecko.kraken_pending_retry_loop())
+    spawn(price_store_dumper(PRICE_STORE_DUMP_INTERVAL), name="price_store_dumper")
+    spawn(pool_refresh_loop(POOL_REFRESH_INTERVAL), name="pool_refresh")
+    spawn(coingecko.refresh_loop(COINGECKO_REFRESH_INTERVAL), name="cg_refresh")
+    spawn(coingecko.kraken_pending_retry_loop(), name="cg_kraken_pending")
 
     # CEX deposit / withdraw status — adaptive cadence: ~5 min when
     # nothing is hot, ~8 s when at least one token has an active spread.
     # Kraken intentionally not polled (no per-chain D/W info exposed).
-    asyncio.create_task(cex_network_loop("bybit"))
-    asyncio.create_task(cex_network_loop("gate"))
+    spawn(cex_network_loop("bybit"), name="netstatus_bybit")
+    spawn(cex_network_loop("gate"), name="netstatus_gate")
 
     # Orderbook-depth poller — REST-refreshes Kraken books for tokens
     # that currently have a spread (Bybit depth is already WS-live).
-    asyncio.create_task(kraken_depth_loop(ORDERBOOK_DEPTH_POLL_INTERVAL))
+    spawn(kraken_depth_loop(ORDERBOOK_DEPTH_POLL_INTERVAL), name="kraken_depth")
 
     log.info("orchestrator: system online")
     await asyncio.Event().wait()
