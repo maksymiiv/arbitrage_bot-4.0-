@@ -236,14 +236,14 @@ async def replace_pool(
     Side effects:
       - Old pool gets added to `bad_pools._REJECTED` so the
         dex_pool_manager discovery pass won't immediately re-attach it.
-      - When `trigger_restart` is True, sets `WS_RESTART_EVENT` so
+      - When `trigger_restart` is True, sets the chain's restart event so
         chain_monitor reconnects with the updated subscription list.
         The bulk migration passes False and restarts once at the end.
 
     Returns True if a real swap happened, False on no-op / failure.
     """
     from dex_part.core.bad_pools import mark_rejected
-    from dex_part.core.ws_subscriber import WS_RESTART_EVENT
+    from dex_part.core.ws_subscriber import get_restart_event
 
     chain_l = (chain or "").lower()
     old_l = (old_pool or "").lower()
@@ -326,9 +326,10 @@ async def replace_pool(
     # Force WS to re-init + re-subscribe so chain_monitor drops the old
     # V2/V3 subscription. V4 pools are picked up by v4_monitor's own
     # periodic reload, so a restart isn't strictly needed for them — but
-    # the old pool still needs to leave chain_monitor's set.
+    # the old pool still needs to leave chain_monitor's set. Restart only
+    # the affected chain.
     if trigger_restart:
-        WS_RESTART_EVENT.set()
+        get_restart_event(chain_l).set()
 
     log.info(
         "pool upgraded: %s %s %s -> %s (dex=%s%s)",

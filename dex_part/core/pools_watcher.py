@@ -5,7 +5,7 @@ Watch pools.json for changes and signal WS sessions to restart.
 import asyncio
 
 from .pools_io import POOLS_FILE, normalized_snapshot
-from .ws_subscriber import WS_RESTART_EVENT
+from .ws_subscriber import get_restart_event
 from engine.logger import get_logger
 
 
@@ -32,6 +32,15 @@ async def pools_file_watcher() -> None:
         current = normalized_snapshot()
 
         if current != known:
-            log.info("pools.json changed -> restarting WS subscriptions")
+            # Restart only the chains whose pool set actually changed —
+            # a swap on eth must not force bsc/base to reconnect (which
+            # would spam provider handshakes and risk 429s).
+            changed = [
+                chain for chain in (set(current) | set(known))
+                if current.get(chain) != known.get(chain)
+            ]
+            if changed:
+                log.info("pools.json changed on %s -> restarting those WS", changed)
+                for chain in changed:
+                    get_restart_event(chain).set()
             known = current
-            WS_RESTART_EVENT.set()

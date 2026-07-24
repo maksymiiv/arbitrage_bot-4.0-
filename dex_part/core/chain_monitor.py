@@ -30,7 +30,7 @@ from .dex_resolve import get_dex_handler_by_version
 from .pool_version_detect import detect_pool_version, save_pool_version
 from .pools_io import load_sync as load_pools_sync
 from .stable_native import is_native, is_stable
-from .ws_subscriber import WS_RESTART_EVENT, subscribe_all
+from .ws_subscriber import get_restart_event, subscribe_all
 
 
 log = get_logger(__name__)
@@ -102,11 +102,13 @@ async def monitor_chain(chain_name: str) -> None:
     base_backoff = 2.0
     max_backoff = 5 * 60.0
 
+    restart_event = get_restart_event(chain_name)
+
     while True:
-        WS_RESTART_EVENT.clear()
+        restart_event.clear()
         try:
             await _run_ws_session(chain_name)
-            consecutive_errors = 0  # clean exit / WS_RESTART_EVENT → reset
+            consecutive_errors = 0  # clean exit / restart signal → reset
         except (ConnectionClosedError, ConnectionClosedOK) as e:
             log.warning("[%s] WS closed: %s", chain_name, type(e).__name__)
             await asyncio.sleep(1)
@@ -232,7 +234,8 @@ async def _init_metadata(
 
 
 async def _recv_loop(ws, chain_name: str, metadata: dict) -> None:
-    while not WS_RESTART_EVENT.is_set():
+    restart_event = get_restart_event(chain_name)
+    while not restart_event.is_set():
         try:
             raw = await asyncio.wait_for(ws.recv(), timeout=30)
         except asyncio.TimeoutError:

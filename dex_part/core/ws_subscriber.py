@@ -7,7 +7,20 @@ from engine.logger import get_logger
 
 log = get_logger(__name__)
 
-WS_RESTART_EVENT = asyncio.Event()
+# Per-chain WS restart signals. Each chain owns its own event so a
+# pools.json change (or pool swap) on ONE chain restarts only that
+# chain's WS session — not every chain — and each chain clears its own
+# flag without racing the others over a single shared event.
+WS_RESTART_EVENTS: dict[str, asyncio.Event] = {}
+
+
+def get_restart_event(chain: str) -> asyncio.Event:
+    """Return (creating on first use) the restart event for `chain`."""
+    ev = WS_RESTART_EVENTS.get(chain)
+    if ev is None:
+        ev = asyncio.Event()
+        WS_RESTART_EVENTS[chain] = ev
+    return ev
 
 
 async def subscribe_all(ws, pools) -> None:
