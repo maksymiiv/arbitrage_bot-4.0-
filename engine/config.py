@@ -81,6 +81,15 @@ CHAINS = {
 SPREAD_INTERVAL = _float("SPREAD_INTERVAL", 1.0)
 SPREAD_MIN_PCT = _float("SPREAD_MIN_PCT", 0.3)
 
+# Staleness gates for the scanner: a price older than this many seconds
+# has its side skipped. 0 = DISABLED (default). Enable with care —
+# illiquid tokens legitimately go silent for long stretches, so an
+# aggressive gate drops real (if thin) opportunities. The CEX gate is
+# the safer one to turn on first (a stale CEX price usually means the WS
+# feed dropped); keep any DEX gate generous (hours, not minutes).
+MAX_CEX_AGE_SEC = _float("MAX_CEX_AGE_SEC", 0.0)
+MAX_DEX_AGE_SEC = _float("MAX_DEX_AGE_SEC", 0.0)
+
 
 # ---------- Diagnostics ----------
 # How often to dump a full price_store snapshot to logs. 0 disables.

@@ -25,6 +25,7 @@ from typing import Iterable, Optional
 
 import aiohttp
 
+from engine import price_store
 from engine.atomic_io import atomic_write_json
 from engine.logger import get_logger
 from engine.rate_limiter import acquire as rl_acquire
@@ -204,6 +205,11 @@ async def drop_pool_for_replacement(chain: str, pool: str) -> None:
     if symbol:
         _drop_pool_from_cache(symbol, chain_l, pool_l)
 
+    # 2b) drop the now-orphaned DEX price so a stale value from the
+    #     rejected pool can't feed a phantom spread before a replacement
+    #     pool binds and starts updating.
+    price_store.remove_dex_by_pool(chain_l, pool_l)
+
     # 3) trigger a debounced re-discovery. If DexScreener has another
     #    pool for the same token, sync_pools_with_cache will pick it up;
     #    if the only candidate is the one we just rejected, the
@@ -316,6 +322,10 @@ async def replace_pool(
         _drop_pool_from_cache(sym_u, chain_l, old_l)
         # Blacklist old address so DS-driven discovery can't loop it back.
         mark_rejected(chain_l, old_l)
+        # Drop the old pool's lingering DEX price — the new pool may not
+        # emit its first swap for a while, and until then the stale value
+        # would feed phantom spreads.
+        price_store.remove_dex_by_pool(chain_l, old_l)
     try:
         # Indexes the pool/poolId -> token key so price_store can route
         # swaps. Works the same for a V4 poolId (just a longer string).

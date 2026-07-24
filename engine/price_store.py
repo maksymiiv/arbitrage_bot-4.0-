@@ -197,6 +197,26 @@ class PriceStore:
     # maintenance
     # ----------------------------------------------------------------------
 
+    def remove_dex_by_pool(self, chain: str, pool: str) -> bool:
+        """
+        Drop the DEX price entry bound to (chain, pool), if present.
+
+        Called when a pool is unbound (replaced by a better one, or
+        rejected for bad prices) so the stale price from the OLD pool
+        can't linger in the store and feed phantom spreads until the
+        replacement pool emits its first swap.
+        """
+        chain = self._norm_chain(chain)
+        pool = self._norm_pool(pool)
+        if not chain or not pool:
+            return False
+        for entry in self._data.values():
+            d = (entry.get("dex") or {}).get(chain)
+            if d and self._norm_pool(d.get("pool") or "") == pool:
+                del entry["dex"][chain]
+                return True
+        return False
+
     def cleanup(self, max_age: float = 5.0) -> None:
         """
         Remove price entries older than max_age seconds. Currently unused

@@ -4,11 +4,22 @@ from cex_part import cache_manager
 from cex_part.config.blacklist import is_chain_blacklisted
 from cex_part.core.orderbook_depth import cumulative_usd_in_range, register_depth_watch
 from cex_part.network_status import register_hot_watch
-from engine.config import ORDERBOOK_MIN_DEPTH_USD
+from engine.config import MAX_CEX_AGE_SEC, MAX_DEX_AGE_SEC, ORDERBOOK_MIN_DEPTH_USD
 from engine.liquidity_filter import is_low_liquidity
 
 from .calculators import calc_dex_to_cex, calc_cex_to_dex
 from .models import SpreadOpportunity
+
+
+def _too_stale(opp: SpreadOpportunity) -> bool:
+    """True if either side of `opp` is older than its configured age gate.
+    A negative age means the timestamp was missing → treat as not-stale
+    (don't gate on unknown). Gates of 0 are disabled."""
+    if MAX_CEX_AGE_SEC and opp.cex_age is not None and opp.cex_age > MAX_CEX_AGE_SEC:
+        return True
+    if MAX_DEX_AGE_SEC and opp.dex_age is not None and opp.dex_age > MAX_DEX_AGE_SEC:
+        return True
+    return False
 
 
 def scan_snapshot(snapshot: dict, min_spread_pct: float = 0.5) -> List[SpreadOpportunity]:
@@ -76,7 +87,11 @@ def scan_snapshot(snapshot: dict, min_spread_pct: float = 0.5) -> List[SpreadOpp
                         dex_chain=dex_chain,
                         dex_data=dex_data,
                     )
-                    if cand is not None and cand.spread_pct >= min_spread_pct:
+                    if (
+                        cand is not None
+                        and cand.spread_pct >= min_spread_pct
+                        and not _too_stale(cand)
+                    ):
                         opp1 = cand
 
                 opp2 = None
@@ -88,7 +103,11 @@ def scan_snapshot(snapshot: dict, min_spread_pct: float = 0.5) -> List[SpreadOpp
                         dex_chain=dex_chain,
                         dex_data=dex_data,
                     )
-                    if cand is not None and cand.spread_pct >= min_spread_pct:
+                    if (
+                        cand is not None
+                        and cand.spread_pct >= min_spread_pct
+                        and not _too_stale(cand)
+                    ):
                         opp2 = cand
 
                 # Neither side crossed threshold → skip without any
