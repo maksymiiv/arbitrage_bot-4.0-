@@ -134,16 +134,19 @@ async def _run_v4_session(chain: str, manager: str) -> None:
         log.info("[%s/v4] subscribed to PoolManager %s", chain, manager)
 
         while True:
+            # Periodic reload picks up newly-discovered V4 pools. Do it
+            # BEFORE recv so a quiet chain (recv repeatedly timing out)
+            # still reloads on schedule instead of stalling until the
+            # next swap arrives.
+            if time.time() - last_reload > _RELOAD_INTERVAL:
+                pools = _load_v4_pools(chain)
+                last_reload = time.time()
+
             try:
                 raw = await asyncio.wait_for(ws.recv(), timeout=60)
             except asyncio.TimeoutError:
                 # quiet period — ping_interval keeps the socket alive
                 continue
-
-            # periodic reload picks up newly-discovered V4 pools
-            if time.time() - last_reload > _RELOAD_INTERVAL:
-                pools = _load_v4_pools(chain)
-                last_reload = time.time()
 
             try:
                 msg = json.loads(raw)
