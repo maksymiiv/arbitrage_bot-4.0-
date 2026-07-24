@@ -57,7 +57,7 @@ async def run_bybit(bybit_wss, poll_seconds: int = 60) -> None:
         await asyncio.sleep(poll_seconds)
 
 
-async def run_gate(poll_seconds: int = 60) -> None:
+async def run_gate(gate_wss, poll_seconds: int = 60) -> None:
     while True:
         try:
             symbols = await get_gate_spot_coins()
@@ -76,6 +76,10 @@ async def run_gate(poll_seconds: int = 60) -> None:
                 if meta:
                     await cache_manager.merge_token("gate", meta)
                     schedule_pool_sync()
+                    # Stream this token's BBO now that it has metadata —
+                    # targeted (only DEX-relevant tokens) rather than every
+                    # Gate spot pair, to keep price_store lean.
+                    await gate_wss.subscribe_symbol(sym)
                 else:
                     await cache_manager.mark_symbol_ignored("gate", sym)
 
