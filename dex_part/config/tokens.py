@@ -3,9 +3,10 @@ STABLES = {
         "0x55d398326f99059ff775485246999027b3197955",  # USDT
         "0xe9e7cea3dedca5984780bafc599bd69add087d56",  # BUSD
         "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",  # USDC
-        "0x8d0D000Ee44948FC98c9B98A4FA4921476f08B0d",   # USD1
-        "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d",
-        "0x17EAfd08994305D8AcE37EfB82F1523177eC70EE",
+        "0x8d0D000Ee44948FC98c9B98A4FA4921476f08B0d",  # USD1
+        # NOTE: 0x8AC76a51... (a case-variant of the USDC line above) was
+        # removed as an exact duplicate — is_stable() lowercases anyway.
+        "0x17EAfd08994305D8AcE37EfB82F1523177eC70EE",  # ??? verify: treated as a USD stable
     ],
     "eth": [
         "0xdAC17F958D2ee523a2206206994597C13D831ec7",  # USDT

@@ -20,12 +20,12 @@ STABLE_SYMBOLS = {
     "EURC",
     "USD1",
     "AUSD",
-    "DYDX",
-    "VSN" #FIND V4 POOOL, NOW V3 LOW LIQ
 }
 
 # Сюди можна руками додавати будь-які монети, які треба ігнорити
 MANUAL_BLACKLIST = {
+    "DYDX",  # not a stable — moved here from STABLE_SYMBOLS
+    "VSN",   # find V4 pool; V3 currently too low-liq
     # "WBTC",
     # "WETH",
     # "HOLO",
