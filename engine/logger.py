@@ -129,6 +129,11 @@ def _configure_root() -> None:
     root.addHandler(_console_handler())
     root.addHandler(_file_handler("engine.log"))
 
+    # Keep noisy third-party libraries out of the log even when our own
+    # root level is DEBUG — their internals flood the file for no benefit.
+    for noisy in ("websockets", "web3", "aiohttp", "asyncio", "urllib3"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
+
     # Belt & braces: never let logging itself crash the process if a
     # handler raises. Default `raiseExceptions=True` would propagate.
     logging.raiseExceptions = False
