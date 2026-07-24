@@ -131,7 +131,6 @@ async def run_kraken(kraken_wss, poll_seconds: int = 60) -> None:
                 except Exception as e:
                     log.warning("[KRAKEN] sub fail %s: %s", sym, e)
 
-            cache_manager.save_kraken_unknown_symbols(missing)
             await cache_manager.flush(force=True)
 
         except Exception as e:

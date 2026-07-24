@@ -42,9 +42,6 @@ _WARM_PHASE_SEC = 24 * 3600       # boundary: warm → cold
 _HOT_RETRY_SEC = 2 * 60
 _COLD_RETRY_SEC = 24 * 3600
 
-# Back-compat alias — older code paths may still reference this.
-RETRY_TTL_SEC = NO_POOL_RETRY_TTL_SEC
-
 
 def _retry_cooldown(age_since_first_seen: float) -> int:
     """Return the cooldown that should apply at this age."""

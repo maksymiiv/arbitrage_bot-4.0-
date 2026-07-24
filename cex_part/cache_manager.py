@@ -615,21 +615,6 @@ def get_cex_symbols(cex: str, active_only: bool = True) -> List[str]:
     return sorted(result)
 
 
-def save_kraken_unknown_symbols(symbols: List[str]) -> None:
-    path = CACHE_DIR / "kraken_unknown.json"
-
-    existing: List[str] = []
-    if path.exists():
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                existing = json.load(f)
-        except Exception:
-            existing = []
-
-    merged = sorted(set(existing) | set(symbols))
-    atomic_write_json(path, merged)
-
-
 # --------------------------------------------------------------------------
 # CoinGecko metadata backfill — fills `coingecko_id` and `kraken_verified`
 # fields on existing entries. Run once at startup; later restarts skip
@@ -1027,10 +1012,3 @@ async def cleanup_kraken_pending() -> None:
         "cleanup_kraken_pending: dropped=%d cleaned=%d newly_ignored=%d",
         dropped, cleaned, len(ignored_to_add),
     )
-
-
-# --------------------------------------------------------------------------
-# Backwards-compat alias (deprecated): pool resolver used to return SYMBOL,
-# now returns canonical KEY. Kept under the old name for transitional code.
-# --------------------------------------------------------------------------
-resolve_symbol_by_pool = resolve_key_by_pool

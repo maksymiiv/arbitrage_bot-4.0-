@@ -1,5 +1,3 @@
-from web3 import Web3
-
 STABLES = {
     "bsc": [
         "0x55d398326f99059ff775485246999027b3197955",  # USDT
@@ -20,17 +18,6 @@ STABLES = {
         # USDbC (wrapped USDC з Ethereum, теж дуже популярний на Base)
         "0x0FA42cE0eCF862fC8aA301B3838aFa3935bF68c4",
     ],
-}
-
-SWAP_STABLES_RAW = {
-    "bsc": "0x55d398326f99059fF775485246999027B3197955",
-    "eth": "0x55d398326f99059fF775485246999027B3197955", 
-    "base": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
-}
-
-SWAP_STABLES = {
-    chain: Web3.to_checksum_address(addr)
-    for chain, addr in SWAP_STABLES_RAW.items()
 }
 
 # The zero address denotes NATIVE currency in Uniswap V4 (a V4 pool may

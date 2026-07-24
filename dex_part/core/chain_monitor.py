@@ -43,11 +43,6 @@ _BOOTSTRAP_LAST_TRY: dict[str, float] = {}
 _BOOTSTRAP_COOLDOWN_SEC = 60.0
 
 
-# Optional: only allow DEX updates for symbols already populated by CEX.
-# Default False — DEX may seed new symbols.
-REQUIRE_SYMBOL_EXISTS_IN_STORE = False
-
-
 async def _to_thread_timeout(fn, timeout: float = 12):
     return await asyncio.wait_for(asyncio.to_thread(fn), timeout=timeout)
 
@@ -321,10 +316,6 @@ async def _recv_loop(ws, chain_name: str, metadata: dict) -> None:
         symbol = _resolve_asset_symbol(meta)
         if not symbol:
             continue
-
-        if REQUIRE_SYMBOL_EXISTS_IN_STORE:
-            if symbol not in (price_store.snapshot() or {}):
-                continue
 
         price_store.update_dex(
             symbol=symbol,

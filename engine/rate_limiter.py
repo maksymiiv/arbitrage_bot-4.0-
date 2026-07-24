@@ -40,7 +40,6 @@ class _TokenBucket:
 
 
 _BUCKETS: Dict[str, _TokenBucket] = {}
-_BUCKETS_LOCK = asyncio.Lock()
 
 
 def configure(name: str, rate_per_min: float, capacity: float | None = None) -> None:
