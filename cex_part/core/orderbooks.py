@@ -14,14 +14,14 @@ STABLE_QUOTES = ("USDT", "USDC", "USD")
 
 
 def _empty_book() -> dict:
-    return {"bids": {}, "asks": {}, "ts": 0, "ready": False}
+    return {"bids": {}, "asks": {}, "ts": 0, "ready": False, "u": None}
 
 
 def init_book(key: str) -> None:
     ORDERBOOKS[key] = _empty_book()
 
 
-def apply_snapshot(key: str, bids: list, asks: list) -> None:
+def apply_snapshot(key: str, bids: list, asks: list, u: int | None = None) -> None:
     if key not in ORDERBOOKS:
         init_book(key)
 
@@ -34,6 +34,7 @@ def apply_snapshot(key: str, bids: list, asks: list) -> None:
     for p, s in asks:
         book["asks"][float(p)] = float(s)
 
+    book["u"] = u
     book["ts"] = int(time.time() * 1000)
     book["ready"] = bool(book["bids"] and book["asks"])
 
@@ -41,11 +42,28 @@ def apply_snapshot(key: str, bids: list, asks: list) -> None:
         _update_price_store_from_book(key)
 
 
-def apply_delta(key: str, bids: list, asks: list) -> None:
+def apply_delta(key: str, bids: list, asks: list, u: int | None = None) -> None:
     if key not in ORDERBOOKS:
         return
 
     book = ORDERBOOKS[key]
+
+    # Bybit v5: u == 1 signals a service restart — the payload is a fresh
+    # snapshot, so overwrite rather than merge it onto a stale book.
+    if u == 1:
+        apply_snapshot(key, bids, asks, u)
+        return
+
+    # Drop stale / duplicate deltas. On a single WS connection Bybit
+    # delivers deltas in order, so `u` only moves forward; a u <= last_u
+    # is either the 3s "no change" re-push (same u) or an out-of-order
+    # straggler — applying it would be wrong or wasteful. We deliberately
+    # do NOT resubscribe on a forward gap: Bybit's docs don't guarantee
+    # strictly consecutive u, and it re-sends a snapshot itself on any
+    # real problem — so gap-driven resubscribes would just cause churn.
+    last_u = book.get("u")
+    if u is not None and last_u is not None and u <= last_u:
+        return
 
     for p, s in bids:
         p = float(p)
@@ -63,6 +81,8 @@ def apply_delta(key: str, bids: list, asks: list) -> None:
         else:
             book["asks"][p] = s
 
+    if u is not None:
+        book["u"] = u
     book["ts"] = int(time.time() * 1000)
 
     if book["bids"] and book["asks"]:

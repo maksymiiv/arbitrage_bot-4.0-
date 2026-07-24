@@ -157,11 +157,12 @@ class BybitOrderBookManager:
                         data = msg.get("data", {})
                         bids = data.get("b", [])
                         asks = data.get("a", [])
+                        u = data.get("u")
 
                         if msg_type == "snapshot":
-                            apply_snapshot(key, bids, asks)
+                            apply_snapshot(key, bids, asks, u)
                         else:
-                            apply_delta(key, bids, asks)
+                            apply_delta(key, bids, asks, u)
 
             except asyncio.CancelledError:
                 raise
