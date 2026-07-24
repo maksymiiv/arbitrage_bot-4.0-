@@ -1,0 +1,41 @@
+# --- secrets ---
+.env
+.env.*
+!.env.example
+
+# --- python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- venv ---
+venv/
+.venv/
+env/
+
+# --- runtime data ---
+logs/
+*.log
+*.zip
+*.bak
+*.bak-*
+
+# --- generated caches ---
+cex_part/cex_cache/
+dex_part/config/pools.json
+dex_part/utils/token_cache.json
+dex_part/token_cache.json
+dex_part/kyber_cache.json
+cex_part/dex_best_pools_dump.json
+cex_part/dex_pool_errors.json
+
+# --- IDE / agents ---
+.idea/
+.vscode/
+.claude/
+*.swp
+.DS_Store
