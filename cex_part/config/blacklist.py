@@ -112,10 +112,10 @@ CHAIN_BLACKLIST: set[tuple[str, str]] = {
 # наприклад, коли конкретна біржа неправильно/оманливо котирує цей токен,
 # або її лістинг під цим тікером — інший токен. Біржа — малими:
 # "bybit", "kraken", "gate".
-EXCHANGE_BLACKLIST: set[tuple[str, str]] = {
-    # ("SOMETOKEN", "kraken"),
-    # ("EDGE", "gate"),
-}
+#
+# Додавай так (НЕ через порожні {} з коментарями — це був би dict, не set):
+#   EXCHANGE_BLACKLIST = {("EDGE", "gate"), ("SOMETOKEN", "kraken")}
+EXCHANGE_BLACKLIST: set[tuple[str, str]] = set()
 
 
 def normalize_symbol(symbol: str) -> str:
