@@ -48,6 +48,7 @@ from engine.config import (
     LIQUIDITY_MIN_VOL_USD,
     POOL_AUTO_UPGRADE,
     POOL_UPGRADE_MIN_VOL,
+    POOL_UPGRADE_VOL_RATIO,
 )
 from engine.logger import get_logger
 from engine.rate_limiter import acquire as rl_acquire
@@ -514,6 +515,33 @@ def _v4_currencies(best: dict) -> Optional[tuple[str, str]]:
     return pair[0], pair[1]
 
 
+def _better_pool_by_volume(
+    candidates: list[dict],
+    current_pool: Optional[str],
+    current_vol: float,
+    vol_ratio: float,
+) -> Optional[dict]:
+    """From pre-filtered candidate pools, pick the one to switch TO — or
+    None to keep the current pool.
+
+    Ranks by 24h volume (activity): for arbitrage a live, actively-traded
+    price beats a fat but idle one. Switches away from the current pool
+    only when the best candidate out-trades it by `vol_ratio`, so a
+    frozen (0-volume) current pool always loses while two comparably-
+    active pools don't flip-flop. Liquidity is enforced upstream (each
+    candidate already clears BOUND_POOL_MIN_USD), so it isn't re-checked
+    here — this is purely "which live pool".
+    """
+    if not candidates:
+        return None
+    best = max(candidates, key=lambda p: p["vol_24h"])
+    if best["address"] == current_pool:
+        return None
+    if best["vol_24h"] < current_vol * vol_ratio:
+        return None
+    return best
+
+
 async def _maybe_upgrade_pool(
     chain: str,
     token_addr: str,
@@ -521,18 +549,22 @@ async def _maybe_upgrade_pool(
     trigger_restart: bool = True,
 ) -> bool:
     """
-    When GT's top pool is substantially better than the one currently
+    When GT reveals a more actively-traded pool than the one currently
     bound in pools.json (originally picked by DexScreener), swap it.
+
+    Selection is ACTIVITY-first, not liquidity-first: a fat but idle pool
+    carries a stale/frozen price (phantom spreads vs the live CEX), so we
+    rank tradable candidates by 24h volume.
 
     Conditions for an upgrade:
       - POOL_AUTO_UPGRADE is enabled
-      - Token has a current pool we can compare against
-      - GT's best candidate is on a DEX our decoders understand
-        (V2 / V3 / Uniswap V4)
-      - Best candidate has >= POOL_UPGRADE_MIN_VOL of 24h volume
-      - Either current pool is not in GT's response at all, OR best
-        clears the tiered ratio gate (2.0x / 1.5x / >1.0x by current
-        liquidity) AND best's 24h volume > current's 24h volume
+      - Candidate is on a DEX our decoders understand (V2 / V3 / Uni V4)
+        and is priceable (one side native/stable)
+      - Candidate clears both floors: >= POOL_UPGRADE_MIN_VOL 24h volume
+        and >= BOUND_POOL_MIN_USD liquidity
+      - The highest-volume candidate out-trades the currently-bound pool
+        by >= POOL_UPGRADE_VOL_RATIO (a frozen/0-volume or unpriceable
+        current pool always loses; comparably-active pools don't flip-flop)
 
     `trigger_restart` is forwarded to `replace_pool` — the bulk migration
     passes False and issues a single WS restart at the end.
@@ -553,18 +585,45 @@ async def _maybe_upgrade_pool(
     # a known DEX, with real 24h volume, AND priceable — one side native
     # or stable (a token/token pool has no USD anchor, compute_price
     # would return 0).
+    # Candidates: decoder-supported (V2/V3 address or V4 poolId) on a known
+    # DEX, priceable (one side native/stable), with real 24h volume AND
+    # enough liquidity to actually trade against (BOUND_POOL_MIN_USD).
     candidates = [
         p for p in pool_infos
         if p["vol_24h"] >= POOL_UPGRADE_MIN_VOL
+        and p["reserve_usd"] >= BOUND_POOL_MIN_USD
         and _is_subscribable_pool(p["address"], p["dex_id"])
         and _is_priceable_pool(chain, p.get("token_a"), p.get("token_b"))
     ]
-    if not candidates:
-        return False
 
-    best = max(candidates, key=lambda p: p["reserve_usd"])
-    if best["address"] == current_pool:
-        return False  # already the best pool
+    # Current pool's activity. A pool GT doesn't list, or one that isn't
+    # priceable (token/token), counts as 0 volume — any active candidate
+    # should win over it.
+    current_info = next(
+        (p for p in pool_infos if p["address"] == current_pool), None
+    )
+    current_priceable = (
+        current_info is not None
+        and _is_priceable_pool(
+            chain, current_info.get("token_a"), current_info.get("token_b")
+        )
+    )
+    current_vol = (
+        float(current_info.get("vol_24h") or 0.0)
+        if (current_info and current_priceable) else 0.0
+    )
+    current_liq = float(current_info.get("reserve_usd") or 0.0) if current_info else 0.0
+
+    # Pick the most ACTIVELY TRADED pool, not the fattest. A high-liquidity
+    # but idle pool carries a stale / frozen price that manufactures
+    # phantom spreads against the live CEX — the classic DEXE case: a $50k
+    # V3 stuck at a wrong price vs a leaner but heavily-traded V4. Switch
+    # only when the best clearly out-trades the current pool.
+    best = _better_pool_by_volume(
+        candidates, current_pool, current_vol, POOL_UPGRADE_VOL_RATIO
+    )
+    if best is None:
+        return False
 
     dex_name, version = _parse_gt_dex_id(best["dex_id"])
 
@@ -582,67 +641,13 @@ async def _maybe_upgrade_pool(
             return False
         currency0, currency1 = cur
 
-    # Locate the current pool inside GT's response — gives us both its
-    # liquidity and whether it's even priceable.
-    current_info = None
-    for p in pool_infos:
-        if p["address"] == current_pool:
-            current_info = p
-            break
-    current_liq = current_info["reserve_usd"] if current_info else 0.0
-    current_priceable = (
-        _is_priceable_pool(chain, current_info.get("token_a"), current_info.get("token_b"))
-        if current_info is not None else True
-    )
-
-    # Tiered ratio gate — as the current pool gets richer, smaller
-    # *relative* gains still represent big absolute value, so we
-    # require LESS relative improvement to upgrade:
-    #   current < $10k  → need 2.0x   (low liq: avoid flip-flop on noise)
-    #   current ≥ $10k  → need 1.5x
-    #   current ≥ $50k  → just need > current_liq (any improvement)
-    # Skip the gate entirely when the current pool is unpriceable
-    # (token/token): ANY priceable pool is strictly better than one we
-    # can't value at all.
-    if current_priceable and current_liq > 0:
-        if current_liq >= 50_000:
-            min_ratio = 1.0
-        elif current_liq >= 10_000:
-            min_ratio = 1.5
-        else:
-            min_ratio = 2.0
-        # strict > for the ≥$50k tier ("any improvement"), >= for tiered
-        if min_ratio == 1.0:
-            ratio_ok = best["reserve_usd"] > current_liq
-        else:
-            ratio_ok = best["reserve_usd"] >= current_liq * min_ratio
-        if not ratio_ok:
-            log.debug(
-                "upgrade skip: %s/%s best=$%.0f not %.1fx >= current=$%.0f",
-                chain, token_symbol, best["reserve_usd"],
-                min_ratio, current_liq,
-            )
-            return False
-
-        # Volume must also improve — a fatter pool with dust volume is
-        # often a stale LP position, not a tradable venue.
-        current_vol = float(current_info.get("vol_24h") or 0.0) if current_info else 0.0
-        if best["vol_24h"] <= current_vol:
-            log.debug(
-                "upgrade skip: %s/%s best vol=$%.0f not > current vol=$%.0f",
-                chain, token_symbol, best["vol_24h"], current_vol,
-            )
-            return False
-
-    # NOTE: no LIQUIDITY_MIN_USD floor on the per-pool best — token-level
-    # total already cleared the threshold; this is purely "which pool".
-
     log.info(
-        "pool %s: %s %s %s ($%.0f) -> %s ($%.0f, dex=%s%s, vol_24h=$%.0f)",
+        "pool %s: %s %s %s (liq=$%.0f vol=$%.0f) -> %s "
+        "(liq=$%.0f vol=$%.0f, dex=%s%s)",
         "add" if current_pool is None else "upgrade",
-        chain, token_symbol, current_pool or "(new)", current_liq,
-        best["address"], best["reserve_usd"], dex_name,
-        f" {version}" if version else "", best["vol_24h"],
+        chain, token_symbol, current_pool or "(new)", current_liq, current_vol,
+        best["address"], best["reserve_usd"], best["vol_24h"], dex_name,
+        f" {version}" if version else "",
     )
 
     # Lazy import to avoid a CEX <-> DEX import cycle at module load.

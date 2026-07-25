@@ -184,6 +184,15 @@ POOL_AUTO_UPGRADE = _str("POOL_AUTO_UPGRADE", "true").lower() in ("1", "true", "
 # is a minimum-viable-sign-of-life.
 POOL_UPGRADE_MIN_VOL = _float("POOL_UPGRADE_MIN_VOL", 500.0)
 
+# Pool selection is now ACTIVITY-first (24h volume), not liquidity-first:
+# a fat but idle pool carries a stale/frozen price that manufactures
+# phantom spreads against the live CEX. A candidate must out-trade the
+# currently-bound pool by at least this ratio to trigger a swap (a
+# frozen, 0-volume current pool always loses; two comparably-active
+# pools don't flip-flop). Candidates still must clear BOUND_POOL_MIN_USD
+# liquidity to be tradable.
+POOL_UPGRADE_VOL_RATIO = _float("POOL_UPGRADE_VOL_RATIO", 1.5)
+
 
 # ---------- Orderbook depth filter ----------
 # A spread computed from top-of-book is a phantom unless the CEX side
