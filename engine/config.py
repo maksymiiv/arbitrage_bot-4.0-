@@ -113,6 +113,14 @@ LOG_BACKUP_COUNT = _int("LOG_BACKUP_COUNT", 5)
 # ---------- Misc ----------
 DEXSCREENER_CONCURRENCY = _int("DEXSCREENER_CONCURRENCY", 4)
 
+# Client-side rate cap (req/min) for GeckoTerminal + CoinGecko (they share
+# the "gecko" bucket). GT free-tier 429s this /pools endpoint well below
+# its nominal limit, and each token can page up to 5 requests — 15/min
+# turned out too aggressive (sustained 429s). 8/min is a safer default;
+# lower further if you still see many "GT 429" warnings, or raise it if
+# you add a paid GT/CG key.
+GECKO_RATE_PER_MIN = _float("GECKO_RATE_PER_MIN", 8.0)
+
 # Retry cooldown for (chain, symbol) pairs that DexScreener doesn't yet
 # index a pool for. This is the WARM-PHASE value (2-24h since first
 # detect) — it's tiered in `cex_part.core.dex_pool_manager`:

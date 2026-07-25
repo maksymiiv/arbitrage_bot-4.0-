@@ -139,6 +139,7 @@ async def migrate_all_pools(only_symbols: set[str] | None = None) -> None:
 
     upgraded = 0
     processed = 0
+    deferred = 0  # tokens GT couldn't answer this run (429/timeout) — retried
     try:
         for i, (chain, addr, symbol) in enumerate(remaining, 1):
             wkey = f"{chain}:{addr}"
@@ -162,6 +163,7 @@ async def migrate_all_pools(only_symbols: set[str] | None = None) -> None:
             if result is None:
                 # GT failed (429 / timeout) — DON'T mark done, retried
                 # on the next run.
+                deferred += 1
                 log.debug("migrate: %s/%s GT unavailable, will retry", chain, symbol)
             else:
                 _, _, pool_infos = result
@@ -195,15 +197,24 @@ async def migrate_all_pools(only_symbols: set[str] | None = None) -> None:
         await cache_manager.flush(force=True)
 
     log.info(
-        "migrate: run finished — processed=%d upgraded=%d",
-        processed, upgraded,
+        "migrate: run finished — processed=%d upgraded=%d deferred(429/err)=%d",
+        processed, upgraded, deferred,
     )
     if targeted:
         log.info("migrate: targeted run complete")
-    elif len(done) >= len(work):
-        log.info("migrate: ALL tokens evaluated — full migration complete")
     else:
-        log.info("migrate: re-run `python -m cex_part.core.pool_migrate` to continue")
+        # Recompute from the actual worklist — `done` can hold stale keys
+        # from tokens no longer in `work`, so `len(done) >= len(work)` used
+        # to claim completion while 429-deferred tokens were still pending.
+        still_remaining = [w for w in work if f"{w[0]}:{w[1]}" not in done]
+        if not still_remaining:
+            log.info("migrate: ALL tokens evaluated — full migration complete")
+        else:
+            log.info(
+                "migrate: %d token(s) still pending (%d GT rate-limited this "
+                "run) — re-run `python -m cex_part.core.pool_migrate` to finish",
+                len(still_remaining), deferred,
+            )
 
 
 async def _main() -> None:

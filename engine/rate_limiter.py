@@ -13,6 +13,8 @@ import asyncio
 import time
 from typing import Dict
 
+from engine.config import GECKO_RATE_PER_MIN
+
 
 class _TokenBucket:
     def __init__(self, rate_per_sec: float, capacity: float | None = None):
@@ -64,13 +66,11 @@ async def acquire(name: str) -> None:
 configure("dexscreener", rate_per_min=240.0, capacity=10.0)
 
 # CoinGecko + GeckoTerminal SHARE an IP-level rate limit on the free
-# tier (same parent company). Documented free-tier cap is 30/min,
-# but in practice /tokens/{addr}/pools 429s well below that. We pick
-# 15/min — 2.5x faster than the old 6/min while staying half the
-# nominal cap, keeping cold-start GT bursts manageable. If 429s
-# become frequent again, drop back to 6-8/min. Pro-tier users with
-# an API key can safely raise this in their own configuration.
-configure("gecko", rate_per_min=15.0, capacity=1.0)
+# tier (same parent company). Documented free-tier cap is 30/min, but in
+# practice /tokens/{addr}/pools 429s well below that (and each token can
+# page up to 5 requests). The rate is env-tunable via GECKO_RATE_PER_MIN
+# (default 8/min); lower it if 429s persist, raise it with a paid key.
+configure("gecko", rate_per_min=GECKO_RATE_PER_MIN, capacity=1.0)
 
 # Back-compat aliases — older code paths that asked for "coingecko"
 # or "geckoterminal" still work, but they all draw from the same
