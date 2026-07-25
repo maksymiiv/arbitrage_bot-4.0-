@@ -83,3 +83,8 @@ _BUCKETS["geckoterminal"] = _BUCKETS["gecko"]
 # Kraken's public endpoints share a counter that comfortably sustains
 # ~1 req/sec; 60/min with a small burst capacity stays safely under it.
 configure("kraken_public", rate_per_min=60.0, capacity=2.0)
+
+# Gate public REST (/spot/order_book for the depth filter). Gate's public
+# spot endpoints allow far more, but we only poll tokens with a live
+# spread — 120/min with a small burst is plenty and stays well clear.
+configure("gate_public", rate_per_min=120.0, capacity=4.0)

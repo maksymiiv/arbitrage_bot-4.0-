@@ -17,12 +17,14 @@ Bybit  — the full 50-level book is already streamed into
          Always live; we just read it (no polling).
 Kraken — the WS feed is BBO-only (no depth). We REST-poll
          `/0/public/Depth` for tokens that currently have a spread.
+Gate   — the WS feed (spot.book_ticker) is BBO-only too. We REST-poll
+         `/spot/order_book` for tokens that currently have a spread.
 
 Polling lifecycle
 -----------------
 The scanner calls `register_depth_watch()` on every tick a token shows
 a spread. A brand-new Kraken token also triggers an immediate fetch so
-the next scan tick already has data. The background `kraken_depth_loop`
+the next scan tick already has data. The background `depth_poll_loop`
 refreshes each watched token every few seconds and drops any token not
 re-registered within `_WATCH_TTL_SEC` — i.e. its spread is gone, stop
 polling.
@@ -47,6 +49,11 @@ log = get_logger(__name__)
 KRAKEN_DEPTH_URL = "https://api.kraken.com/0/public/Depth"
 KRAKEN_DEPTH_COUNT = 50
 
+# Gate WS is BBO-only (spot.book_ticker), so — like Kraken — we REST-poll
+# the order book for tokens that currently have a spread.
+GATE_DEPTH_URL = "https://api.gateio.ws/api/v4/spot/order_book"
+GATE_DEPTH_LIMIT = 50
+
 # Drop a token from the poll set when no spread re-registered it within
 # this window. Short on purpose: "spread gone → stop polling promptly".
 # Slightly longer than a couple of scan ticks so a spread momentarily
@@ -64,6 +71,10 @@ _KRAKEN_BOOKS: dict[str, dict] = {}
 # Symbols with an in-flight Kraken fetch — dedupes concurrent calls.
 _KRAKEN_PENDING: set[str] = set()
 
+# Gate REST-polled books (same shape as _KRAKEN_BOOKS) + in-flight set.
+_GATE_BOOKS: dict[str, dict] = {}
+_GATE_PENDING: set[str] = set()
+
 
 # --------------------------------------------------------------------------
 # watch registration
@@ -74,8 +85,9 @@ def register_depth_watch(cex: str, symbol: str) -> None:
     Mark (cex, symbol) as having an active spread right now.
 
     Bybit is a no-op — its book is already streamed live over WS, so
-    there's nothing to poll. For Kraken a brand-new token also kicks
-    off an immediate REST fetch so the very next scan tick has depth.
+    there's nothing to poll. Kraken and Gate are BBO-only over WS, so a
+    brand-new token kicks off an immediate REST fetch and the very next
+    scan tick has depth.
     """
     cex_l = (cex or "").lower()
     sym_u = (symbol or "").upper()
@@ -88,12 +100,15 @@ def register_depth_watch(cex: str, symbol: str) -> None:
     is_new = k not in _WATCH
     _WATCH[k] = time.time()
 
-    if is_new and cex_l == "kraken":
+    if is_new and cex_l in ("kraken", "gate"):
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             return
-        loop.create_task(_fetch_kraken_depth(sym_u))
+        if cex_l == "kraken":
+            loop.create_task(_fetch_kraken_depth(sym_u))
+        else:
+            loop.create_task(_fetch_gate_depth(sym_u))
 
 
 # --------------------------------------------------------------------------
@@ -122,6 +137,8 @@ def cumulative_usd_in_range(
         book = ORDERBOOKS.get(f"BYBIT:{sym_u}USDT")
     elif cex_l == "kraken":
         book = _KRAKEN_BOOKS.get(sym_u)
+    elif cex_l == "gate":
+        book = _GATE_BOOKS.get(sym_u)
 
     if not book or not book.get("ready"):
         return None
@@ -194,25 +211,71 @@ async def _fetch_kraken_depth(symbol: str) -> None:
         _KRAKEN_PENDING.discard(sym_u)
 
 
-async def kraken_depth_loop(interval: float) -> None:
+async def _fetch_gate_depth(symbol: str) -> None:
+    """Fetch /spot/order_book for one Gate symbol and store the book."""
+    sym_u = symbol.upper()
+    if sym_u in _GATE_PENDING:
+        return
+    _GATE_PENDING.add(sym_u)
+    try:
+        pair = f"{sym_u}_USDT"
+        await rl_acquire("gate_public")
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                GATE_DEPTH_URL,
+                params={"currency_pair": pair, "limit": GATE_DEPTH_LIMIT},
+                timeout=10,
+            ) as r:
+                if r.status != 200:
+                    log.debug("gate depth %s -> HTTP %d", pair, r.status)
+                    return
+                data = await r.json()
+
+        bids: dict[float, float] = {}
+        asks: dict[float, float] = {}
+        for row in data.get("bids", []):
+            try:
+                bids[float(row[0])] = float(row[1])
+            except (TypeError, ValueError, IndexError):
+                pass
+        for row in data.get("asks", []):
+            try:
+                asks[float(row[0])] = float(row[1])
+            except (TypeError, ValueError, IndexError):
+                pass
+
+        _GATE_BOOKS[sym_u] = {
+            "bids": bids,
+            "asks": asks,
+            "ts": int(time.time() * 1000),
+            "ready": bool(bids and asks),
+        }
+    except Exception as e:
+        log.debug("gate depth fetch failed for %s: %s", symbol, e)
+    finally:
+        _GATE_PENDING.discard(sym_u)
+
+
+async def depth_poll_loop(interval: float) -> None:
     """
-    Background task: REST-refresh orderbook depth for every Kraken token
-    that currently has an active spread. Tokens leave the poll set once
-    their spread has been gone for `_WATCH_TTL_SEC`.
+    Background task: REST-refresh orderbook depth for every Kraken/Gate
+    token that currently has an active spread (Bybit is WS-live and never
+    enters the watch set). Tokens leave the poll set once their spread has
+    been gone for `_WATCH_TTL_SEC`.
     """
     if interval <= 0:
-        log.info("kraken depth loop disabled (interval<=0)")
+        log.info("depth poll loop disabled (interval<=0)")
         return
 
     log.info(
-        "kraken depth loop started (interval=%.0fs, watch_ttl=%.0fs)",
+        "depth poll loop started (interval=%.0fs, watch_ttl=%.0fs)",
         interval, _WATCH_TTL_SEC,
     )
     while True:
         await asyncio.sleep(interval)
         try:
             now = time.time()
-            active: list[str] = []
+            active: list[tuple[str, str]] = []
             for k, ts in list(_WATCH.items()):
                 cex_l, sym_u = k
                 if now - ts > _WATCH_TTL_SEC:
@@ -220,11 +283,16 @@ async def kraken_depth_loop(interval: float) -> None:
                     del _WATCH[k]
                     if cex_l == "kraken":
                         _KRAKEN_BOOKS.pop(sym_u, None)
+                    elif cex_l == "gate":
+                        _GATE_BOOKS.pop(sym_u, None)
                     continue
-                if cex_l == "kraken":
-                    active.append(sym_u)
+                if cex_l in ("kraken", "gate"):
+                    active.append((cex_l, sym_u))
 
-            for sym in active:
-                await _fetch_kraken_depth(sym)
+            for cex_l, sym in active:
+                if cex_l == "kraken":
+                    await _fetch_kraken_depth(sym)
+                else:
+                    await _fetch_gate_depth(sym)
         except Exception as e:
-            log.error("kraken depth loop error: %s", e)
+            log.error("depth poll loop error: %s", e)

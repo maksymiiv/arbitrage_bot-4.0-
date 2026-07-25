@@ -21,7 +21,7 @@ install_print_bridge()
 
 log = get_logger(__name__)
 
-from cex_part.core.orderbook_depth import kraken_depth_loop  # noqa: E402
+from cex_part.core.orderbook_depth import depth_poll_loop  # noqa: E402
 from cex_part.core.pool_refresh import pool_refresh_loop  # noqa: E402
 from cex_part.main import start_cex  # noqa: E402
 from cex_part.network_status import cex_network_loop  # noqa: E402
@@ -70,9 +70,9 @@ async def main() -> None:
     spawn(cex_network_loop("bybit"), name="netstatus_bybit")
     spawn(cex_network_loop("gate"), name="netstatus_gate")
 
-    # Orderbook-depth poller — REST-refreshes Kraken books for tokens
-    # that currently have a spread (Bybit depth is already WS-live).
-    spawn(kraken_depth_loop(ORDERBOOK_DEPTH_POLL_INTERVAL), name="kraken_depth")
+    # Orderbook-depth poller — REST-refreshes Kraken + Gate books for
+    # tokens that currently have a spread (Bybit depth is already WS-live).
+    spawn(depth_poll_loop(ORDERBOOK_DEPTH_POLL_INTERVAL), name="depth_poll")
 
     log.info("orchestrator: system online")
     await asyncio.Event().wait()

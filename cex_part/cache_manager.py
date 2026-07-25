@@ -848,8 +848,13 @@ def is_route_open(key: str, cex: str, chain: str, direction: str) -> Optional[bo
     """
     Tri-state route check from `networks_cex`:
         True   — exchange currently allows this direction on this chain
-        False  — explicitly disabled
-        None   — unknown (no data; caller MUST treat as "don't filter")
+        False  — closed: either the flag is off, OR the exchange lists
+                 networks for this token but NOT this chain (so it doesn't
+                 support the token there → the route is impossible, e.g.
+                 Bybit lists 1INCH only on ETH but the DEX side is BSC)
+        None   — unknown: no network data for this CEX at all (missing, or
+                 empty as with Kraken, which doesn't expose per-chain D/W).
+                 Caller MUST treat None as "don't filter".
 
     `direction` is "deposit" or "withdraw". Chain is the internal short
     key ("eth", "bsc", "base", "sol") — accepted in any case, networks_cex
@@ -861,11 +866,14 @@ def is_route_open(key: str, cex: str, chain: str, direction: str) -> Optional[bo
     if not isinstance(entry, dict):
         return None
     cex_block = (entry.get("networks_cex") or {}).get(cex.lower())
-    if not isinstance(cex_block, dict):
+    # No network data for this CEX (missing, or empty like Kraken) → unknown.
+    if not isinstance(cex_block, dict) or not cex_block:
         return None
     chain_status = cex_block.get(chain.upper()) or cex_block.get(chain.lower())
     if not isinstance(chain_status, list) or len(chain_status) < 2:
-        return None
+        # The CEX reports networks for this token but not this chain — it
+        # doesn't support the token there, so the route can't be settled.
+        return False
     idx = 0 if direction == "deposit" else 1
     return bool(chain_status[idx])
 

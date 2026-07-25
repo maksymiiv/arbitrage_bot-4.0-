@@ -53,6 +53,10 @@ CHAIN_BLACKLIST: set[tuple[str, str]] = {
     # CEX (Bybit/Kraken/Gate) виводять виключно у BSC-мережу.
     ("BNB", "eth"),
     ("BNB", "base"),
+    # DOT — Polkadot-native. Kraken doesn't expose per-chain D/W, so the
+    # route filter can't catch it; a bridged DOT ERC-20 pool on ETH makes
+    # a phantom spread that can't be settled (no CEX withdraws DOT to ETH).
+    ("DOT", "eth"),
     ("BABYDOGE", "eth"),
     ("ENJ", "eth"),
     ("XUSD", "bsc"),
