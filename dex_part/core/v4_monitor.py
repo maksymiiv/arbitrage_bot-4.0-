@@ -122,25 +122,45 @@ async def _run_v4_session(chain: str, manager: str) -> None:
     log.info("[%s/v4] connecting, %d v4 pools tracked", chain, len(pools))
 
     last_reload = time.time()
+    subscribed_ids = set(pools.keys())
 
     async with websockets.connect(ws_url, ping_interval=20) as ws:
+        # Server-side poolId filter: poolId is the indexed topics[1], and
+        # a topic position accepts an OR-array. Without it we'd receive
+        # EVERY V4 swap on the chain and discard ~99% client-side — on a
+        # metered provider (Alchemy bills ~40 CU per delivered WS event)
+        # that firehose was burning millions of CU per hour for nothing.
         await ws.send(json.dumps({
             "jsonrpc": "2.0", "id": 1, "method": "eth_subscribe",
-            "params": ["logs", {"address": manager, "topics": [SWAP_TOPIC_V4]}],
+            "params": ["logs", {
+                "address": manager,
+                "topics": [SWAP_TOPIC_V4, sorted(subscribed_ids)],
+            }],
         }))
         ack = fastjson.loads(await ws.recv())
         if ack.get("error"):
             raise RuntimeError(f"v4 subscribe rejected: {ack['error']}")
-        log.info("[%s/v4] subscribed to PoolManager %s", chain, manager)
+        log.info(
+            "[%s/v4] subscribed to PoolManager %s (%d poolIds, server-filtered)",
+            chain, manager, len(subscribed_ids),
+        )
 
         while True:
             # Periodic reload picks up newly-discovered V4 pools. Do it
             # BEFORE recv so a quiet chain (recv repeatedly timing out)
             # still reloads on schedule instead of stalling until the
-            # next swap arrives.
+            # next swap arrives. The subscription filter is fixed at
+            # subscribe time, so when the poolId set CHANGES we exit the
+            # session — the reconnect loop re-subscribes with the new list.
             if time.time() - last_reload > _RELOAD_INTERVAL:
                 pools = _load_v4_pools(chain)
                 last_reload = time.time()
+                if set(pools.keys()) != subscribed_ids:
+                    log.info(
+                        "[%s/v4] pool set changed (%d -> %d) — resubscribing",
+                        chain, len(subscribed_ids), len(pools),
+                    )
+                    return
 
             try:
                 raw = await asyncio.wait_for(ws.recv(), timeout=60)
