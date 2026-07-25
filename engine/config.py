@@ -81,6 +81,14 @@ CHAINS = {
 SPREAD_INTERVAL = _float("SPREAD_INTERVAL", 1.0)
 SPREAD_MIN_PCT = _float("SPREAD_MIN_PCT", 0.3)
 
+# Native (WETH/WBNB) USD price is read by RPC-polling the native<->stable
+# pool every this many seconds, instead of WS-subscribing to it. That pool
+# (e.g. WETH/USDC) is one of the busiest contracts on the chain, and on a
+# metered provider every one of its swaps costs ~40 CU — yet we only need
+# the current, slow-moving price. Polling keeps freshness at a fraction of
+# the cost. 15s is plenty for ETH/BNB USD.
+NATIVE_PRICE_POLL_INTERVAL = _float("NATIVE_PRICE_POLL_INTERVAL", 15.0)
+
 # DEX WS stall watchdog: if a chain subscription delivers NO events for
 # this many seconds, assume the subscription silently died (typical on
 # load-balanced free endpoints like publicnode: the socket stays open,

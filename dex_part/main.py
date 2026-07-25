@@ -3,6 +3,7 @@ import asyncio
 from engine.logger import get_logger
 
 from .core.chain_monitor import monitor_chain
+from .core.native_price_poller import native_price_loop
 from .core.pools_watcher import pools_file_watcher
 from .core.v4_monitor import monitor_v4_chain
 
@@ -21,6 +22,12 @@ async def start_dex() -> None:
         # configured (BSC), so it's safe to launch for all three.
         monitor_v4_chain("eth"),
         monitor_v4_chain("base"),
+        # Native (WETH/WBNB) USD price via cheap RPC polling instead of a
+        # WS firehose on the busiest pool. Self-idles until chain_monitor
+        # registers a native<->stable pool.
+        native_price_loop("bsc"),
+        native_price_loop("eth"),
+        native_price_loop("base"),
         pools_file_watcher(),
     )
 

@@ -22,7 +22,7 @@ from engine.config import WS_STALL_RECONNECT_SEC
 from engine.logger import get_logger, setup_chain_logger
 
 from ..config.chains import CHAINS
-from ..utils.native_price import update_native_price
+from ..utils.native_price import register_native_pool, update_native_price
 from ..utils.token_metadata import get_pool_metadata
 from .bad_pools import THRESHOLD as BAD_POOL_THRESHOLD, record_bad_price
 from .current_price import bootstrap_dex_prices
@@ -155,9 +155,20 @@ async def _run_ws_session(chain_name: str) -> None:
             log.error("[%s] bootstrap error: %s", chain_name, e)
         log.info("[%s] bootstrap done", chain_name)
 
+    # Exclude native<->stable pools from the WS subscription — their price
+    # is RPC-polled (native_price_poller). They're the busiest pools on the
+    # chain, so this is the single biggest cut in delivered-event cost.
+    sub_pools = [
+        p for p in pools
+        if not metadata.get(p.lower(), {}).get("is_native_stable_pool")
+    ]
+
     async with websockets.connect(ws_url, ping_interval=20) as ws:
-        await subscribe_all(ws, pools)
-        log.info("[%s] subscribed %d pools", chain_name, len(pools))
+        await subscribe_all(ws, sub_pools)
+        log.info(
+            "[%s] subscribed %d pools (%d native pool(s) RPC-polled, not subscribed)",
+            chain_name, len(sub_pools), len(pools) - len(sub_pools),
+        )
         await _recv_loop(ws, chain_name, metadata)
 
 
@@ -211,6 +222,12 @@ async def _init_metadata(
 
         metadata[pool.lower()] = meta
         pools.append(pool)
+
+        # Native<->stable pools are NOT WS-subscribed (that pool is a swap
+        # firehose we'd pay for just to read one price). Register it for
+        # the RPC poller instead.
+        if meta["is_native_stable_pool"]:
+            register_native_pool(chain_name, pool.lower(), meta)
 
     tasks = [init_one(item) for item in pools_cfg]
     try:
