@@ -26,7 +26,7 @@ import websockets
 from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK
 
 from engine import fastjson, price_store
-from engine.config import CHAINS
+from engine.config import CHAINS, WS_STALL_RECONNECT_SEC
 from engine.logger import get_logger, setup_chain_logger
 
 from ..config.swap_topics import SWAP_TOPIC_V4
@@ -122,6 +122,7 @@ async def _run_v4_session(chain: str, manager: str) -> None:
     log.info("[%s/v4] connecting, %d v4 pools tracked", chain, len(pools))
 
     last_reload = time.time()
+    last_event = time.time()
     subscribed_ids = set(pools.keys())
 
     async with websockets.connect(ws_url, ping_interval=20) as ws:
@@ -165,7 +166,20 @@ async def _run_v4_session(chain: str, manager: str) -> None:
             try:
                 raw = await asyncio.wait_for(ws.recv(), timeout=60)
             except asyncio.TimeoutError:
-                # quiet period — ping_interval keeps the socket alive
+                # Stall watchdog — same rationale as chain_monitor: a
+                # free-endpoint subscription can die silently while the
+                # socket stays alive. With few v4 pools long quiet spells
+                # are more plausible, but a reconnect is cheap (metadata
+                # is all cached), so the same threshold is fine.
+                if (
+                    WS_STALL_RECONNECT_SEC
+                    and time.time() - last_event > WS_STALL_RECONNECT_SEC
+                ):
+                    log.warning(
+                        "[%s/v4] no events for %.0fs — reconnecting",
+                        chain, time.time() - last_event,
+                    )
+                    return
                 continue
 
             try:
@@ -174,6 +188,8 @@ async def _run_v4_session(chain: str, manager: str) -> None:
                 continue
             if msg.get("method") != "eth_subscription":
                 continue
+
+            last_event = time.time()
             result = (msg.get("params") or {}).get("result") or {}
 
             decoded = decode_swap(result)

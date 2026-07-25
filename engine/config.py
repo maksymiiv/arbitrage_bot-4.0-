@@ -81,6 +81,14 @@ CHAINS = {
 SPREAD_INTERVAL = _float("SPREAD_INTERVAL", 1.0)
 SPREAD_MIN_PCT = _float("SPREAD_MIN_PCT", 0.3)
 
+# DEX WS stall watchdog: if a chain subscription delivers NO events for
+# this many seconds, assume the subscription silently died (typical on
+# load-balanced free endpoints like publicnode: the socket stays open,
+# pings pass, but pushes stop) and force a reconnect. With hundreds of
+# subscribed pools even 5 min of total silence is abnormal on bsc/eth.
+# 0 disables the watchdog.
+WS_STALL_RECONNECT_SEC = _float("WS_STALL_RECONNECT_SEC", 300.0)
+
 # Staleness gates for the scanner: a price older than this many seconds
 # has its side skipped. 0 = DISABLED (default). Enable with care —
 # illiquid tokens legitimately go silent for long stretches, so an

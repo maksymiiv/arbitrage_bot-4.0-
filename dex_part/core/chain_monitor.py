@@ -18,6 +18,7 @@ from web3 import Web3
 from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK
 
 from engine import fastjson, price_store
+from engine.config import WS_STALL_RECONNECT_SEC
 from engine.logger import get_logger, setup_chain_logger
 
 from ..config.chains import CHAINS
@@ -225,10 +226,27 @@ async def _init_metadata(
 
 async def _recv_loop(ws, chain_name: str, metadata: dict) -> None:
     restart_event = get_restart_event(chain_name)
+    last_event = time.time()
     while not restart_event.is_set():
         try:
             raw = await asyncio.wait_for(ws.recv(), timeout=30)
         except asyncio.TimeoutError:
+            # Stall watchdog: load-balanced free endpoints (publicnode et
+            # al.) sometimes kill the subscription while keeping the
+            # socket + pings alive — the session then looks "quiet"
+            # forever and prices silently freeze. With hundreds of
+            # subscribed pools, minutes of TOTAL silence means the
+            # subscription is dead, not the market.
+            if (
+                WS_STALL_RECONNECT_SEC
+                and time.time() - last_event > WS_STALL_RECONNECT_SEC
+            ):
+                log.warning(
+                    "[%s] no subscription events for %.0fs — assuming dead "
+                    "subscription, reconnecting",
+                    chain_name, time.time() - last_event,
+                )
+                return
             continue
 
         try:
@@ -238,6 +256,8 @@ async def _recv_loop(ws, chain_name: str, metadata: dict) -> None:
 
         if data.get("method") != "eth_subscription":
             continue
+
+        last_event = time.time()
 
         params = data.get("params")
         if not params or "result" not in params:
