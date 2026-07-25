@@ -19,16 +19,28 @@ class SpreadLogger:
         target = base_dir or str(PROJECT_ROOT / LOG_DIR / "spreads")
         self.base_dir = Path(target)
         self.base_dir.mkdir(parents=True, exist_ok=True)
+        self._date: str | None = None
+        self._fh = None
 
-    def _file_path(self) -> Path:
+    def _handle(self):
+        """Keep one open append handle, reopening only on date rollover —
+        avoids an open()+close() syscall pair on every logged line."""
         date_str = datetime.now().strftime("%Y-%m-%d")
-        return self.base_dir / f"spreads_{date_str}.log"
+        if date_str != self._date or self._fh is None:
+            if self._fh is not None:
+                try:
+                    self._fh.close()
+                except Exception:
+                    pass
+            self._fh = (self.base_dir / f"spreads_{date_str}.log").open(
+                "a", encoding="utf-8"
+            )
+            self._date = date_str
+        return self._fh
 
     def log(self, message: str) -> None:
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        line = f"[{now}] {message}"
-
         _console_log.info(message)
-
-        with self._file_path().open("a", encoding="utf-8") as f:
-            f.write(line + "\n")
+        fh = self._handle()
+        fh.write(f"[{now}] {message}\n")
+        fh.flush()

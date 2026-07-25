@@ -180,6 +180,28 @@ class PriceStore:
     def snapshot(self) -> Dict[str, Any]:
         return copy.deepcopy(self._data)
 
+    def snapshot_view(self) -> Dict[str, Any]:
+        """Return the LIVE internal dict WITHOUT copying.
+
+        For read-only consumers that run synchronously within a single
+        event-loop tick (the spread scanner): asyncio is single-threaded
+        and the consumer never awaits mid-iteration, so the store cannot
+        mutate underneath it and the deepcopy that snapshot() pays is
+        pure overhead (it ran every second over ~1500 tokens). NEVER
+        mutate the returned dict, and never hold it across an await.
+        """
+        return self._data
+
+    def has_dex_for_chain(self, chain: str) -> bool:
+        """Cheap existence check (no copy) — is any token priced on this
+        DEX chain? Replaces a full snapshot() deepcopy at the callsite."""
+        chain = self._norm_chain(chain)
+        for entry in self._data.values():
+            d = entry.get("dex")
+            if d and chain in d:
+                return True
+        return False
+
     # ----------------------------------------------------------------------
     # filter helpers
     # ----------------------------------------------------------------------

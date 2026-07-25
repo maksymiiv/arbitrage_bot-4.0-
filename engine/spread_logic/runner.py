@@ -12,9 +12,13 @@ log = get_logger(__name__)
 
 
 def _make_fingerprint(opportunities) -> str:
+    # Dedup on the SET of opportunities + spread rounded to 0.01%. Ages are
+    # deliberately excluded — they tick every second, which made the old
+    # fingerprint change every tick and defeated the dedup entirely (the
+    # full block re-logged once per second). Now an unchanged/idle spread
+    # logs once; only a real composition or >=0.01% spread change re-logs.
     rows = [
-        f"{o.symbol}|{o.direction}|{o.cex_exchange}|{o.dex_chain}|"
-        f"{round(o.spread_pct, 8)}|{round(o.cex_age, 2)}|{round(o.dex_age, 2)}"
+        f"{o.symbol}|{o.direction}|{o.cex_exchange}|{o.dex_chain}|{round(o.spread_pct, 2)}"
         for o in opportunities
     ]
     return hashlib.md5("\n".join(rows).encode("utf-8")).hexdigest()
@@ -27,7 +31,10 @@ async def spread_runner(interval: float = 1.0, min_spread_pct: float = 0.5) -> N
 
     while True:
         try:
-            snapshot = price_store.snapshot()
+            # scan_snapshot is fully synchronous (no await mid-iteration),
+            # so a live read-only view is safe and skips a per-second
+            # deepcopy of the whole store.
+            snapshot = price_store.snapshot_view()
             opportunities = scan_snapshot(snapshot, min_spread_pct=min_spread_pct)
             fp = _make_fingerprint(opportunities)
 

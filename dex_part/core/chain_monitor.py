@@ -48,11 +48,7 @@ async def _to_thread_timeout(fn, timeout: float = 12):
 
 
 def _has_any_dex_prices_for_chain(chain_name: str) -> bool:
-    snap = price_store.snapshot()
-    for _, data in (snap or {}).items():
-        if chain_name in ((data or {}).get("dex") or {}):
-            return True
-    return False
+    return price_store.has_dex_for_chain(chain_name)
 
 
 def _should_bootstrap(chain_name: str) -> bool:
