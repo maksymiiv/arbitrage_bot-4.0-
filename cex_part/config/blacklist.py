@@ -75,6 +75,7 @@ CHAIN_BLACKLIST: set[tuple[str, str]] = {
     ("PUMPBTC", "bsc"),
     ("DOT", "base"),
     ("DOVU", "base"),
+    ("1INCH", "bsc"),
     ("EWT", "eth"),
     ("YALA", "eth"),
     ("ALPHA", "bsc"),
@@ -107,12 +108,26 @@ CHAIN_BLACKLIST: set[tuple[str, str]] = {
 }
 
 
+# (symbol, exchange) пари, які треба виключити зі сканування спредів —
+# наприклад, коли конкретна біржа неправильно/оманливо котирує цей токен,
+# або її лістинг під цим тікером — інший токен. Біржа — малими:
+# "bybit", "kraken", "gate".
+EXCHANGE_BLACKLIST: set[tuple[str, str]] = {
+    # ("SOMETOKEN", "kraken"),
+    # ("EDGE", "gate"),
+}
+
+
 def normalize_symbol(symbol: str) -> str:
     return (symbol or "").strip().upper()
 
 
 def normalize_chain(chain: str) -> str:
     return (chain or "").strip().lower()
+
+
+def normalize_exchange(exchange: str) -> str:
+    return (exchange or "").strip().lower()
 
 
 def is_blacklisted(symbol: str) -> bool:
@@ -122,6 +137,11 @@ def is_blacklisted(symbol: str) -> bool:
 def is_chain_blacklisted(symbol: str, chain: str) -> bool:
     """True якщо (symbol, chain) у списку структурно нереалізованих пар."""
     return (normalize_symbol(symbol), normalize_chain(chain)) in CHAIN_BLACKLIST
+
+
+def is_exchange_blacklisted(symbol: str, exchange: str) -> bool:
+    """True якщо (symbol, exchange) вручну виключено зі сканування."""
+    return (normalize_symbol(symbol), normalize_exchange(exchange)) in EXCHANGE_BLACKLIST
 
 
 def filter_blacklisted_symbols(symbols: list[str]) -> list[str]:

@@ -45,3 +45,15 @@ def test_normalize_chain():
     assert normalize_chain("Base Mainnet") == "BASE"
     assert normalize_chain(None) is None
     assert normalize_chain("Fantom") is None  # unknown -> None
+
+
+def test_is_exchange_blacklisted():
+    from cex_part.config import blacklist as bl
+
+    bl.EXCHANGE_BLACKLIST.add(("FOO", "kraken"))
+    try:
+        assert bl.is_exchange_blacklisted("foo", "KRAKEN") is True  # case-insensitive
+        assert bl.is_exchange_blacklisted("FOO", "bybit") is False  # other exchange ok
+        assert bl.is_exchange_blacklisted("BAR", "kraken") is False  # other symbol ok
+    finally:
+        bl.EXCHANGE_BLACKLIST.discard(("FOO", "kraken"))

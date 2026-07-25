@@ -1,7 +1,7 @@
 from typing import List
 
 from cex_part import cache_manager
-from cex_part.config.blacklist import is_chain_blacklisted
+from cex_part.config.blacklist import is_chain_blacklisted, is_exchange_blacklisted
 from cex_part.core.orderbook_depth import cumulative_usd_in_range, register_depth_watch
 from cex_part.network_status import register_hot_watch
 from engine.config import MAX_CEX_AGE_SEC, MAX_DEX_AGE_SEC, ORDERBOOK_MIN_DEPTH_USD
@@ -48,6 +48,11 @@ def scan_snapshot(snapshot: dict, min_spread_pct: float = 0.5) -> List[SpreadOpp
 
         for cex_exchange, cex_data in cex_prices.items():
             if not isinstance(cex_data, dict):
+                continue
+
+            # manual (symbol, exchange) exclusion — e.g. a CEX that
+            # mis-prices this token or lists a different token under it.
+            if is_exchange_blacklisted(symbol, cex_exchange):
                 continue
 
             for dex_chain, dex_data in dex_prices.items():
