@@ -41,7 +41,7 @@ from typing import Optional
 
 import aiohttp
 
-from engine.atomic_io import atomic_write_json
+from engine.atomic_io import atomic_write_json_async
 from engine.config import (
     BOUND_POOL_MIN_USD,
     LIQUIDITY_MIN_USD,
@@ -134,7 +134,7 @@ def _load_from_disk() -> dict[tuple[str, str], dict]:
 async def _persist() -> None:
     async with _FILE_LOCK:
         serializable = {f"{k[0]}|{k[1]}": v for k, v in _CACHE.items()}
-        atomic_write_json(CACHE_FILE, serializable)
+        await atomic_write_json_async(CACHE_FILE, serializable)
 
 
 def init_cache() -> None:

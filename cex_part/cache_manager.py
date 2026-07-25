@@ -32,7 +32,7 @@ from typing import Dict, List, Optional, Tuple
 
 from cex_part.config.blacklist import filter_blacklisted_symbols, is_blacklisted
 from cex_part.config.symbol_overrides import lookup as override_lookup
-from engine.atomic_io import atomic_write_json
+from engine.atomic_io import atomic_write_json_async
 from engine.logger import get_logger
 
 
@@ -103,8 +103,10 @@ async def flush(force: bool = False) -> None:
             if pending < FLUSH_BATCH_SIZE and (now - _LAST_FLUSH) < FLUSH_INTERVAL:
                 return
 
-        _atomic_write_json(TOKENS_FILE, _CACHE)
-        _atomic_write_json(TOKEN_LIST_FILE, _TOKEN_LIST)
+        # Serialize under the lock (no await between build + dump, so the
+        # dicts can't mutate mid-dump); the slow disk write is offloaded.
+        await atomic_write_json_async(TOKENS_FILE, _CACHE)
+        await atomic_write_json_async(TOKEN_LIST_FILE, _TOKEN_LIST)
 
         _PENDING_META = 0
         _PENDING_LIST = 0
@@ -123,11 +125,6 @@ def _load_json(path: Path, default):
     except Exception as e:
         log.warning("failed to load %s: %s — falling back to default", path, e)
         return default
-
-
-def _atomic_write_json(path: Path, data) -> None:
-    """Thin wrapper kept for callsite stability — retry/locking lives in engine.atomic_io."""
-    atomic_write_json(path, data)
 
 
 # --------------------------------------------------------------------------
