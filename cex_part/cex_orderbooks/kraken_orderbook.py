@@ -11,7 +11,7 @@ import json
 
 import websockets
 
-from engine import price_store
+from engine import fastjson, price_store
 from engine.logger import get_logger
 
 
@@ -111,7 +111,7 @@ class KrakenOrderBookManager:
                                 f"Kraken shard={shard_id} recv timeout {RECV_TIMEOUT}s"
                             )
 
-                        msg = json.loads(raw)
+                        msg = fastjson.loads(raw)
                         if not isinstance(msg, dict):
                             continue
 

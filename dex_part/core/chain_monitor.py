@@ -7,7 +7,6 @@ Per-chain WebSocket session:
 """
 
 import asyncio
-import json
 import time
 import traceback
 from datetime import datetime
@@ -18,7 +17,7 @@ import websockets
 from web3 import Web3
 from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK
 
-from engine import price_store
+from engine import fastjson, price_store
 from engine.logger import get_logger, setup_chain_logger
 
 from ..config.chains import CHAINS
@@ -233,7 +232,7 @@ async def _recv_loop(ws, chain_name: str, metadata: dict) -> None:
             continue
 
         try:
-            data = json.loads(raw)
+            data = fastjson.loads(raw)
         except Exception:
             continue
 

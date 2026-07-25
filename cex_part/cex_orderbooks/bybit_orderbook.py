@@ -3,6 +3,7 @@ import json
 
 import websockets
 
+from engine import fastjson
 from engine.logger import get_logger
 
 from ..cache_manager import get_cex_symbols
@@ -136,7 +137,7 @@ class BybitOrderBookManager:
                     self.ready.set()
 
                     async for raw in ws:
-                        msg = json.loads(raw)
+                        msg = fastjson.loads(raw)
 
                         if "success" in msg or "ret_msg" in msg or msg.get("op"):
                             if msg.get("success") is False:

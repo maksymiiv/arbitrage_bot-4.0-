@@ -2,3 +2,6 @@ aiohttp>=3.9,<4
 python-dotenv>=1.0,<2
 web3==6.11.1
 websockets==15.0.1
+# optional: ~3-6x faster WS JSON parsing; engine.fastjson falls back to
+# the stdlib json if it's not installed.
+orjson>=3,<4

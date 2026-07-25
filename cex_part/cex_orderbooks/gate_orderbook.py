@@ -16,7 +16,7 @@ import time
 
 import websockets
 
-from engine import price_store
+from engine import fastjson, price_store
 from engine.logger import get_logger
 
 from ..cache_manager import get_cex_symbols
@@ -115,7 +115,7 @@ class GateOrderBookManager:
                             raise RuntimeError(f"Gate recv timeout {RECV_TIMEOUT}s")
 
                         try:
-                            msg = json.loads(raw)
+                            msg = fastjson.loads(raw)
                         except Exception:
                             continue
                         if isinstance(msg, dict):

@@ -25,7 +25,7 @@ from decimal import Decimal
 import websockets
 from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK
 
-from engine import price_store
+from engine import fastjson, price_store
 from engine.config import CHAINS
 from engine.logger import get_logger, setup_chain_logger
 
@@ -128,7 +128,7 @@ async def _run_v4_session(chain: str, manager: str) -> None:
             "jsonrpc": "2.0", "id": 1, "method": "eth_subscribe",
             "params": ["logs", {"address": manager, "topics": [SWAP_TOPIC_V4]}],
         }))
-        ack = json.loads(await ws.recv())
+        ack = fastjson.loads(await ws.recv())
         if ack.get("error"):
             raise RuntimeError(f"v4 subscribe rejected: {ack['error']}")
         log.info("[%s/v4] subscribed to PoolManager %s", chain, manager)
@@ -149,7 +149,7 @@ async def _run_v4_session(chain: str, manager: str) -> None:
                 continue
 
             try:
-                msg = json.loads(raw)
+                msg = fastjson.loads(raw)
             except Exception:
                 continue
             if msg.get("method") != "eth_subscription":
