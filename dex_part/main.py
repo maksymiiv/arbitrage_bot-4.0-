@@ -4,6 +4,7 @@ from engine.logger import get_logger
 
 from .core.chain_monitor import monitor_chain
 from .core.native_price_poller import native_price_loop
+from .core.pool_reconcile import reconcile_loop
 from .core.pools_watcher import pools_file_watcher
 from .core.v4_monitor import monitor_v4_chain
 
@@ -28,6 +29,12 @@ async def start_dex() -> None:
         native_price_loop("bsc"),
         native_price_loop("eth"),
         native_price_loop("base"),
+        # Multicall reconciliation backstop — refreshes every tracked
+        # V2/V3 pool on a schedule so a WS per-pool drop can't freeze a
+        # price indefinitely.
+        reconcile_loop("bsc"),
+        reconcile_loop("eth"),
+        reconcile_loop("base"),
         pools_file_watcher(),
     )
 

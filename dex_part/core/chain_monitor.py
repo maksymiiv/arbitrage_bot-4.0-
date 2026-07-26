@@ -22,7 +22,8 @@ from engine.config import WS_STALL_RECONNECT_SEC
 from engine.logger import get_logger, setup_chain_logger
 
 from ..config.chains import CHAINS
-from ..utils.native_price import register_native_pool, update_native_price
+from ..utils.native_price import update_native_price
+from .pool_registry import register_pool
 from ..utils.token_metadata import get_pool_metadata
 from .bad_pools import THRESHOLD as BAD_POOL_THRESHOLD, record_bad_price
 from .current_price import bootstrap_dex_prices
@@ -223,11 +224,12 @@ async def _init_metadata(
         metadata[pool.lower()] = meta
         pools.append(pool)
 
-        # Native<->stable pools are NOT WS-subscribed (that pool is a swap
-        # firehose we'd pay for just to read one price). Register it for
-        # the RPC poller instead.
-        if meta["is_native_stable_pool"]:
-            register_native_pool(chain_name, pool.lower(), meta)
+        # Register every pool in the shared registry: the reconciliation
+        # loop re-reads them all via Multicall, and the native-price poller
+        # picks out the native<->stable ones. Native pools are also excluded
+        # from the WS subscription below (that pool is a swap firehose we'd
+        # pay for just to read one price).
+        register_pool(chain_name, pool.lower(), meta)
 
     tasks = [init_one(item) for item in pools_cfg]
     try:

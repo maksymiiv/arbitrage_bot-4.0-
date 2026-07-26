@@ -9,10 +9,10 @@ NATIVE_PRICE_POLL_INTERVAL seconds: a single slot0/getReserves call is
 cheap and 15s freshness is more than enough for a slow-moving ETH/BNB USD
 price.
 
-chain_monitor registers native<->stable pools into
-`native_price.NATIVE_POOLS` while building metadata (and no longer
-subscribes to them over WS). This loop reads those pools and updates the
-shared native-price cache. Startup seeding still comes from
+chain_monitor registers pools into the shared `pool_registry` while
+building metadata (and no longer WS-subscribes to native<->stable ones).
+This loop reads the native<->stable pools from that registry and updates
+the shared native-price cache. Startup seeding still comes from
 `current_price.bootstrap_dex_prices`, so token pricing works before the
 first poll.
 """
@@ -25,8 +25,9 @@ from web3 import Web3
 from engine.config import CHAINS, NATIVE_PRICE_POLL_INTERVAL
 from engine.logger import get_logger
 
-from ..utils.native_price import NATIVE_POOLS, update_native_price
+from ..utils.native_price import update_native_price
 from .current_price import _read_pool_state
+from .pool_registry import get_pools
 
 
 log = get_logger(__name__)
@@ -45,7 +46,10 @@ async def native_price_loop(chain: str, interval: float | None = None) -> None:
     warned_empty = False
     while True:
         try:
-            pools = dict(NATIVE_POOLS.get(chain) or {})
+            pools = {
+                p: m for p, m in get_pools(chain).items()
+                if m.get("is_native_stable_pool")
+            }
             if not pools:
                 if not warned_empty:
                     log.info(

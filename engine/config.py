@@ -81,6 +81,14 @@ CHAINS = {
 SPREAD_INTERVAL = _float("SPREAD_INTERVAL", 1.0)
 SPREAD_MIN_PCT = _float("SPREAD_MIN_PCT", 0.3)
 
+# DEX pool reconciliation: WS log subscriptions silently stop delivering
+# SOME pools' swaps over time (a pool freezes while it's still trading on
+# chain), and the chain-level stall watchdog can't see a single-pool drop.
+# As a backstop we re-read EVERY tracked V2/V3 pool via one Multicall3 call
+# per chain every this many seconds, so no price freezes longer than this.
+# 0 disables. One multicall is cheap (~26 CU) regardless of pool count.
+POOL_RECONCILE_INTERVAL = _float("POOL_RECONCILE_INTERVAL", 45.0)
+
 # Native (WETH/WBNB) USD price is read by RPC-polling the native<->stable
 # pool every this many seconds, instead of WS-subscribing to it. That pool
 # (e.g. WETH/USDC) is one of the busiest contracts on the chain, and on a
