@@ -24,6 +24,7 @@ from web3 import Web3
 
 from engine import price_store
 from engine.config import CHAINS, POOL_RECONCILE_INTERVAL
+from engine.endpoints import current_rpc, rotate_rpc
 from engine.logger import get_logger
 
 from .dex_resolve import get_dex_handler_by_version
@@ -145,7 +146,7 @@ async def reconcile_loop(chain: str, interval: float | None = None) -> None:
     if interval <= 0:
         log.info("[%s] pool reconcile disabled (interval<=0)", chain)
         return
-    rpc_url = (CHAINS.get(chain) or {}).get("rpc")
+    rpc_url = current_rpc(chain) or (CHAINS.get(chain) or {}).get("rpc")
     if not rpc_url:
         log.warning("[%s] no RPC configured — pool reconcile disabled", chain)
         return
@@ -153,11 +154,23 @@ async def reconcile_loop(chain: str, interval: float | None = None) -> None:
     w3 = Web3(Web3.HTTPProvider(rpc_url, request_kwargs={"timeout": 15}))
     log.info("[%s] pool reconcile loop started (interval=%.0fs)", chain, interval)
 
+    fails = 0
     while True:
         await asyncio.sleep(interval)
         try:
             n = await asyncio.to_thread(_reconcile_once, w3, chain)
             if n:
                 log.debug("[%s] reconcile refreshed %d pools", chain, n)
+                fails = 0
+            elif get_pools(chain):
+                # pools exist but none refreshed → RPC likely down
+                fails += 1
         except Exception as e:
             log.debug("[%s] reconcile loop error: %s", chain, e)
+            fails += 1
+
+        if fails >= 2:
+            new_url = rotate_rpc(chain)
+            if new_url:
+                w3 = Web3(Web3.HTTPProvider(new_url, request_kwargs={"timeout": 15}))
+            fails = 0

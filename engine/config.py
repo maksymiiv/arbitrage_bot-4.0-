@@ -53,24 +53,43 @@ BYBIT_API_SECRET = _str("BYBIT_API_SECRET")
 # `v4_pool_manager` — the Uniswap V4 singleton PoolManager for the chain.
 # All V4 pools live inside this one contract; absence of the key means
 # the chain has no Uniswap V4 (BSC — PancakeSwap Infinity instead, TBD).
+def _list(name: str, default: str) -> list[str]:
+    """Comma-separated endpoint list from env (fallback providers). Falls
+    back to `default` when the env var is unset/empty."""
+    raw = os.getenv(name, "").strip() or default
+    return [u.strip() for u in raw.split(",") if u.strip()]
+
+
 # Endpoint defaults are PUBLIC, keyless fallbacks (publicnode / official
 # dataseeds) — never embed API keys here. Real production endpoints
 # (Alchemy / NodeReal / etc.) belong in .env; if set there, they win.
+# Each *_WS / *_RPC may be a COMMA-SEPARATED list — the connection layer
+# rotates to the next one when an endpoint keeps failing (e.g. a free
+# provider rate-limiting our IP), so no single dead endpoint darkens a
+# chain. `ws`/`rpc` keep the primary (first) for simple callers;
+# `ws_list`/`rpc_list` carry all of them.
+_BSC_WS = _list("BSC_WS", "wss://bsc-rpc.publicnode.com,wss://bsc.callstaticrpc.com")
+_BSC_RPC = _list("BSC_RPC", "https://bsc-dataseed.binance.org,https://bsc.drpc.org")
+_ETH_WS = _list("ETH_WS", "wss://ethereum-rpc.publicnode.com,wss://eth.drpc.org")
+_ETH_RPC = _list("ETH_RPC", "https://ethereum-rpc.publicnode.com,https://eth.drpc.org")
+_BASE_WS = _list("BASE_WS", "wss://base-rpc.publicnode.com,wss://base.drpc.org")
+_BASE_RPC = _list("BASE_RPC", "https://mainnet.base.org,https://base.drpc.org")
+
 CHAINS = {
     "bsc": {
-        "ws": _str("BSC_WS", "wss://bsc.publicnode.com"),
-        "rpc": _str("BSC_RPC", "https://bsc-dataseed.binance.org"),
+        "ws": _BSC_WS[0], "ws_list": _BSC_WS,
+        "rpc": _BSC_RPC[0], "rpc_list": _BSC_RPC,
         "native": "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",  # WBNB
     },
     "eth": {
-        "ws": _str("ETH_WS", "wss://ethereum.publicnode.com"),
-        "rpc": _str("ETH_RPC", "https://ethereum.publicnode.com"),
+        "ws": _ETH_WS[0], "ws_list": _ETH_WS,
+        "rpc": _ETH_RPC[0], "rpc_list": _ETH_RPC,
         "native": "0xC02aaa39b223FE8D0A0e5C4F27eAD9083C756Cc2",  # WETH
         "v4_pool_manager": "0x000000000004444c5dc75cB358380D2e3dE08A90",
     },
     "base": {
-        "ws": _str("BASE_WS", "wss://base.publicnode.com"),
-        "rpc": _str("BASE_RPC", "https://mainnet.base.org"),
+        "ws": _BASE_WS[0], "ws_list": _BASE_WS,
+        "rpc": _BASE_RPC[0], "rpc_list": _BASE_RPC,
         "native": "0x4200000000000000000000000000000000000006",  # WETH on Base
         "v4_pool_manager": "0x498581fF718922c3f8e6A244956aF099B2652b2b",
     },

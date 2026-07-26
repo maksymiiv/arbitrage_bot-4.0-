@@ -23,6 +23,7 @@ from decimal import Decimal
 from web3 import Web3
 
 from engine.config import CHAINS, NATIVE_PRICE_POLL_INTERVAL
+from engine.endpoints import current_rpc, rotate_rpc
 from engine.logger import get_logger
 
 from ..utils.native_price import update_native_price
@@ -35,7 +36,7 @@ log = get_logger(__name__)
 
 async def native_price_loop(chain: str, interval: float | None = None) -> None:
     interval = interval or NATIVE_PRICE_POLL_INTERVAL
-    rpc_url = (CHAINS.get(chain) or {}).get("rpc")
+    rpc_url = current_rpc(chain) or (CHAINS.get(chain) or {}).get("rpc")
     if not rpc_url:
         log.warning("[%s] no RPC configured — native price poller disabled", chain)
         return
@@ -44,13 +45,17 @@ async def native_price_loop(chain: str, interval: float | None = None) -> None:
     log.info("[%s] native price poller started (interval=%.0fs)", chain, interval)
 
     warned_empty = False
+    fails = 0
     while True:
+        got = False
+        had_native = False
         try:
             pools = {
                 p: m for p, m in get_pools(chain).items()
                 if m.get("is_native_stable_pool")
             }
-            if not pools:
+            had_native = bool(pools)
+            if not had_native:
                 if not warned_empty:
                     log.info(
                         "[%s] native price poller: no native<->stable pool "
@@ -72,8 +77,21 @@ async def native_price_loop(chain: str, interval: float | None = None) -> None:
                             else (Decimal(1) / price)
                         )
                         update_native_price(chain, native_usd)
+                        got = True
                         break  # one good native pool is enough
         except Exception as e:
             log.debug("[%s] native price poll error: %s", chain, e)
+
+        # RPC failover: native pools exist but we couldn't read a price for
+        # several cycles → the endpoint is likely down, rotate to the next.
+        if had_native and not got:
+            fails += 1
+            if fails >= 3:
+                new_url = rotate_rpc(chain)
+                if new_url:
+                    rpc = Web3(Web3.HTTPProvider(new_url, request_kwargs={"timeout": 10}))
+                fails = 0
+        else:
+            fails = 0
 
         await asyncio.sleep(interval)

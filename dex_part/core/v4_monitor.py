@@ -27,6 +27,7 @@ from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK
 
 from engine import fastjson, price_store
 from engine.config import CHAINS, WS_STALL_RECONNECT_SEC
+from engine.endpoints import current_ws, rotate_ws
 from engine.logger import get_logger, setup_chain_logger
 
 from ..config.swap_topics import SWAP_TOPIC_V4
@@ -96,8 +97,8 @@ async def monitor_v4_chain(chain: str) -> None:
         except Exception as e:
             consecutive_errors += 1
             msg = str(e).lower()
-            is_429 = "429" in msg or "too many" in msg
-            if is_429:
+            is_reject = any(s in msg for s in ("429", "too many", "403", "forbidden"))
+            if is_reject:
                 wait = max(60.0, min(_BACKOFF_MAX, _BACKOFF_BASE * (2 ** consecutive_errors)))
             else:
                 wait = min(_BACKOFF_MAX, _BACKOFF_BASE * (2 ** (consecutive_errors - 1)))
@@ -105,6 +106,8 @@ async def monitor_v4_chain(chain: str) -> None:
                 "[%s/v4] session error (#%d, sleep %.0fs): %s",
                 chain, consecutive_errors, wait, e,
             )
+            if is_reject or consecutive_errors >= 2:
+                rotate_ws(chain)
             await asyncio.sleep(wait)
 
 
@@ -118,7 +121,7 @@ async def _run_v4_session(chain: str, manager: str) -> None:
         await asyncio.sleep(_RELOAD_INTERVAL)
         return
 
-    ws_url = CHAINS[chain]["ws"]
+    ws_url = current_ws(chain) or CHAINS[chain]["ws"]
     log.info("[%s/v4] connecting, %d v4 pools tracked", chain, len(pools))
 
     last_reload = time.time()

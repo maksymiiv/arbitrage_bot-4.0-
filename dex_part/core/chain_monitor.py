@@ -19,6 +19,7 @@ from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK
 
 from engine import fastjson, price_store
 from engine.config import WS_STALL_RECONNECT_SEC
+from engine.endpoints import current_rpc, current_ws, rotate_ws
 from engine.logger import get_logger, setup_chain_logger
 
 from ..config.chains import CHAINS
@@ -107,17 +108,17 @@ async def monitor_chain(chain_name: str) -> None:
             consecutive_errors = 0  # normal close — don't escalate
         except Exception as e:
             consecutive_errors += 1
-            # HTTP 429 on the WS handshake means the provider's rate
-            # limiter rejected the *connection attempt*; retrying within
-            # seconds will just get rejected again. Sleep at least 60s
-            # in that case before retrying.
+            # 429/403 on the WS handshake means the provider is rejecting
+            # us (rate-limit / ban); retrying the same URL within seconds
+            # just gets rejected again. Sleep longer AND rotate endpoint.
             msg = str(e).lower()
-            is_429 = "429" in msg or "too many" in msg
+            is_reject = any(s in msg for s in ("429", "too many", "403", "forbidden"))
 
-            if is_429:
+            if is_reject:
                 wait = max(60.0, min(max_backoff, base_backoff * (2 ** consecutive_errors)))
                 log.error(
-                    "[%s] WS handshake 429 (provider rate-limit) — sleeping %.0fs before retry #%d",
+                    "[%s] WS handshake rejected (provider rate-limit/ban) — "
+                    "sleeping %.0fs before retry #%d",
                     chain_name, wait, consecutive_errors,
                 )
             else:
@@ -127,13 +128,20 @@ async def monitor_chain(chain_name: str) -> None:
                     chain_name, consecutive_errors, wait, e, traceback.format_exc(),
                 )
 
+            # A rejecting or repeatedly-failing endpoint won't recover by
+            # retrying the same URL — advance to the next configured one.
+            if is_reject or consecutive_errors >= 2:
+                rotate_ws(chain_name)
+
             await asyncio.sleep(wait)
 
 
 async def _run_ws_session(chain_name: str) -> None:
     chain = CHAINS[chain_name]
-    ws_url = chain["ws"]
-    rpc = Web3(Web3.HTTPProvider(chain["rpc"], request_kwargs={"timeout": 10}))
+    ws_url = current_ws(chain_name) or chain["ws"]
+    rpc = Web3(Web3.HTTPProvider(
+        current_rpc(chain_name) or chain["rpc"], request_kwargs={"timeout": 10}
+    ))
 
     pools_cfg = load_pools_sync().get(chain_name, [])
     if not pools_cfg:
