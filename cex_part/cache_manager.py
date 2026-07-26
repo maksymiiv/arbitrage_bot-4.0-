@@ -38,6 +38,20 @@ from engine.logger import get_logger
 
 log = get_logger(__name__)
 
+
+# Warnings that would otherwise fire on EVERY price tick (e.g. an ambiguous
+# ticker resolved on each CEX update) — log once per distinct key so a
+# persistent config situation doesn't flood the log 300+ times.
+_WARNED_ONCE: set = set()
+
+
+def _warn_once(key, *args) -> None:
+    if key in _WARNED_ONCE:
+        return
+    _WARNED_ONCE.add(key)
+    log.warning(*args)
+
+
 BASE_DIR = Path(__file__).resolve().parent
 CACHE_DIR = BASE_DIR / "cex_cache"
 TOKENS_FILE = CACHE_DIR / "cex_tokens.json"
@@ -295,9 +309,10 @@ def resolve_key_for_cex_symbol(cex: str, symbol: str) -> Optional[str]:
 
     if matches_for_cex:
         if len(matches_for_cex) > 1:
-            log.warning(
+            _warn_once(
+                ("ambiguous", cex_l, sym_u),
                 "ambiguous (cex=%s, symbol=%s) -> %d matches; using %s. "
-                "Consider pinning via SYMBOL_OVERRIDES.",
+                "Consider pinning via SYMBOL_OVERRIDES. (logged once)",
                 cex_l, sym_u, len(matches_for_cex), matches_for_cex[0],
             )
         return matches_for_cex[0]
@@ -307,8 +322,10 @@ def resolve_key_for_cex_symbol(cex: str, symbol: str) -> Optional[str]:
     if len(keys) == 1:
         return keys[0]
 
-    log.warning(
-        "no metadata for (cex=%s, symbol=%s); %d candidate token entries",
+    _warn_once(
+        ("no_meta", cex_l, sym_u),
+        "no metadata for (cex=%s, symbol=%s); %d candidate token entries "
+        "(logged once)",
         cex_l, sym_u, len(keys),
     )
     return None
