@@ -309,12 +309,20 @@ def resolve_key_for_cex_symbol(cex: str, symbol: str) -> Optional[str]:
 
     if matches_for_cex:
         if len(matches_for_cex) > 1:
+            # A CEX lists ONE token per ticker, so >1 entry carrying this
+            # (cex, symbol) means our cache is stale/ambiguous (e.g. Gate
+            # once listed Gensyn as "AI", now lists a different AI). The
+            # price message has no contract, so we can't tell which is
+            # meant — refuse to route rather than emit a wrong-token
+            # spread. Pin the right one via SYMBOL_OVERRIDES.
             _warn_once(
                 ("ambiguous", cex_l, sym_u),
-                "ambiguous (cex=%s, symbol=%s) -> %d matches; using %s. "
-                "Consider pinning via SYMBOL_OVERRIDES. (logged once)",
-                cex_l, sym_u, len(matches_for_cex), matches_for_cex[0],
+                "ambiguous (cex=%s, symbol=%s) -> %d entries have this CEX "
+                "(%s); NOT routing. Pin the correct one via SYMBOL_OVERRIDES. "
+                "(logged once)",
+                cex_l, sym_u, len(matches_for_cex), matches_for_cex,
             )
+            return None
         return matches_for_cex[0]
 
     # CEX listed the symbol but never wrote metadata (Kraken case before
