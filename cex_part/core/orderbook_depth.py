@@ -38,6 +38,7 @@ from typing import Optional
 
 import aiohttp
 
+from engine import price_store
 from engine.logger import get_logger
 from engine.rate_limiter import acquire as rl_acquire
 
@@ -74,6 +75,30 @@ _KRAKEN_PENDING: set[str] = set()
 # Gate REST-polled books (same shape as _KRAKEN_BOOKS) + in-flight set.
 _GATE_BOOKS: dict[str, dict] = {}
 _GATE_PENDING: set[str] = set()
+
+
+# --------------------------------------------------------------------------
+# CEX price refresh from a REST book
+# --------------------------------------------------------------------------
+
+def _push_cex_price(exchange: str, symbol: str, bids: dict, asks: dict) -> None:
+    """Push best bid/ask from a freshly-fetched REST book into price_store.
+
+    Kraken/Gate stream BBO over WS, but a WS feed can silently stop
+    delivering a symbol while the socket stays alive (heartbeats) — the
+    price then freezes for hours and fabricates phantom spreads. The depth
+    poller already REST-fetches the book for every symbol that has a live
+    spread (i.e. exactly the frozen ones), so refreshing the price from
+    that same fetch self-corrects the freeze at no extra request.
+    """
+    if not bids or not asks:
+        return
+    best_bid = max(bids)
+    best_ask = min(asks)
+    if best_bid > 0 and best_ask > 0 and best_bid <= best_ask:
+        price_store.update_cex(
+            symbol=symbol, exchange=exchange, bid=best_bid, ask=best_ask
+        )
 
 
 # --------------------------------------------------------------------------
@@ -205,6 +230,8 @@ async def _fetch_kraken_depth(symbol: str) -> None:
             "ts": int(time.time() * 1000),
             "ready": bool(bids and asks),
         }
+        # Un-freeze a stale WS price using this fresh REST book.
+        _push_cex_price("kraken", sym_u, bids, asks)
     except Exception as e:
         log.debug("kraken depth fetch failed for %s: %s", symbol, e)
     finally:
@@ -250,6 +277,8 @@ async def _fetch_gate_depth(symbol: str) -> None:
             "ts": int(time.time() * 1000),
             "ready": bool(bids and asks),
         }
+        # Un-freeze a stale WS price using this fresh REST book.
+        _push_cex_price("gate", sym_u, bids, asks)
     except Exception as e:
         log.debug("gate depth fetch failed for %s: %s", symbol, e)
     finally:
