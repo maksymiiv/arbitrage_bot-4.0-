@@ -3,12 +3,7 @@ import asyncio
 from engine.logger import get_logger
 from engine.tasks import spawn
 
-from .cache_manager import (
-    apply_coingecko_metadata,
-    backfill_cex_symbols,
-    cleanup_kraken_pending,
-    init_cache,
-)
+from .cache_manager import apply_coingecko_metadata, cleanup_kraken_pending, init_cache
 from .cex_orderbooks.bybit_orderbook import BybitOrderBookManager
 from .cex_orderbooks.gate_orderbook import GateOrderBookManager
 from .cex_orderbooks.kraken_orderbook import KrakenOrderBookManager
@@ -51,11 +46,6 @@ async def start_cex() -> None:
     # HTTP — uses the in-memory CG indices loaded by main.py at startup),
     # safe even if CG cache is empty (function logs and returns).
     await apply_coingecko_metadata()
-
-    # Populate the per-exchange ticker map on entries merged before that
-    # field existed, so (cex, ticker) price routing is contract-correct
-    # (fixes e.g. Gate's "AI" colliding with the Gensyn entry).
-    await backfill_cex_symbols()
 
     # Drop entries that are still pending Kraken verification AND not on
     # the retry queue — they're not arbitrageable for current CEX-DEX

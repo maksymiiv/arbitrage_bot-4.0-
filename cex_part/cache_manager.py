@@ -71,8 +71,6 @@ _INDEX = {
     "token_id": {},   # TOKEN_ID.upper -> canonical_key
     "contract": {},   # f"{chain}:{addr.lower()}" -> canonical_key
     "pool": {},       # f"{chain.lower()}:{pool.lower()}" -> canonical_key
-    "cex_symbol": {}, # f"{cex}:{TICKER}" -> canonical_key  (contract-derived,
-                      # e.g. "gate:GENSYNAI" -> the Gensyn entry)
 }
 
 _PENDING_META = 0
@@ -149,7 +147,7 @@ def _load_json(path: Path, default):
 
 def _rebuild_indexes() -> None:
     global _INDEX
-    _INDEX = {"symbol": {}, "token_id": {}, "contract": {}, "pool": {}, "cex_symbol": {}}
+    _INDEX = {"symbol": {}, "token_id": {}, "contract": {}, "pool": {}}
 
     for key, entry in _CACHE.items():
         if not isinstance(entry, dict):
@@ -188,14 +186,6 @@ def _index_entry(key: str, entry: Dict) -> None:
         for p in pools:
             if p:
                 _INDEX["pool"][f"{c}:{str(p).lower()}"] = key
-
-    # Per-exchange ticker map — how each CEX names this token (established
-    # by contract at merge time). Lets a price for (cex, ticker) route to
-    # the contract-correct entry instead of colliding on the canonical
-    # symbol (Gate's "AI" vs the same-token-as "GENSYNAI").
-    for cx, tkr in (entry.get("cex_symbols") or {}).items():
-        if cx and tkr:
-            _INDEX["cex_symbol"][f"{cx.lower()}:{str(tkr).upper()}"] = key
 
 
 def _keys_for_symbol(symbol: str) -> List[str]:
@@ -285,17 +275,6 @@ def resolve_key_for_cex_symbol(cex: str, symbol: str) -> Optional[str]:
     pinned = override_lookup(cex_l, sym_u)
     if pinned and pinned in _CACHE:
         return pinned
-
-    # Contract-derived exchange-ticker map — authoritative for exchanges
-    # that expose contracts (bybit/gate). It routes by how the exchange
-    # actually names the token, so Gate's "AI" (one token) and the same
-    # token listed as "GENSYNAI" resolve to their own entries with no
-    # canonical-symbol collision. Kraken has no contracts → it keeps the
-    # verified-symbol path below.
-    if cex_l != "kraken":
-        exact = _INDEX["cex_symbol"].get(f"{cex_l}:{sym_u}")
-        if exact and exact in _CACHE:
-            return exact
 
     keys = _keys_for_symbol(sym_u)
     if not keys:
@@ -537,10 +516,6 @@ async def merge_token(cex: str, token_data: Dict) -> str:
 
     entry.setdefault("contracts", {}).update(contracts)
     entry.setdefault("networks_cex", {})[cex] = networks
-    # Record the ticker THIS exchange uses for this (contract-resolved)
-    # token, so price routing can match (cex, ticker) exactly.
-    if symbol:
-        entry.setdefault("cex_symbols", {})[cex] = symbol
     entry["last_update"] = int(time.time())
 
     _index_entry(key, entry)
@@ -1067,62 +1042,3 @@ async def cleanup_kraken_pending() -> None:
         "cleanup_kraken_pending: dropped=%d cleaned=%d newly_ignored=%d",
         dropped, cleaned, len(ignored_to_add),
     )
-
-
-# --------------------------------------------------------------------------
-# Backfill: per-exchange ticker map (cex_symbols) for entries merged before
-# the field existed, so (cex, ticker) routing is contract-derived. Uses each
-# contract-carrying exchange's bulk metadata, matched by on-chain contract.
-# Kraken is skipped (no contracts — it uses the verified-symbol path).
-# --------------------------------------------------------------------------
-
-def _contract_key(chain: str, addr: str) -> Optional[str]:
-    if not chain or not addr:
-        return None
-    a = addr.lower()
-    return (
-        _INDEX["contract"].get(f"{chain.upper()}:{a}")
-        or _INDEX["contract"].get(f"{chain.lower()}:{a}")
-    )
-
-
-async def backfill_cex_symbols() -> None:
-    from .cex_metadata.bybit_metadata import fetch_bybit_all_currencies
-    from .cex_metadata.gate_metadata import GateMetadataCache
-
-    changed = 0
-
-    def _bind(cex: str, ticker: str, contracts: Dict[str, str]) -> None:
-        nonlocal changed
-        for chain, addr in (contracts or {}).items():
-            key = _contract_key(chain, addr)
-            if not key:
-                continue
-            entry = _CACHE.get(key)
-            if isinstance(entry, dict):
-                cs = entry.setdefault("cex_symbols", {})
-                if cs.get(cex) != ticker:
-                    cs[cex] = ticker
-                    changed += 1
-            return  # first contract match is enough
-
-    try:
-        gcache = await GateMetadataCache.fetch()
-        for ticker in list(gcache._by_currency.keys()):
-            meta = gcache.get_metadata(ticker)
-            if meta:
-                _bind("gate", ticker.upper(), meta.get("contracts") or {})
-    except Exception as e:
-        log.warning("backfill_cex_symbols: gate failed: %s", e)
-
-    try:
-        rows = await fetch_bybit_all_currencies()
-        for sym, data in (rows or {}).items():
-            _bind("bybit", (sym or "").upper(), data.get("contracts") or {})
-    except Exception as e:
-        log.warning("backfill_cex_symbols: bybit failed: %s", e)
-
-    if changed:
-        _rebuild_indexes()
-        await flush(force=True)
-    log.info("backfill_cex_symbols: set %d exchange-ticker bindings", changed)
