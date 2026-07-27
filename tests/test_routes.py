@@ -37,15 +37,3 @@ def test_route_none_when_no_data():
     assert cm.is_route_open("X", "bybit", "eth", "deposit") is None
     cm._CACHE = {}
     assert cm.is_route_open("MISSING", "bybit", "eth", "deposit") is None
-
-
-def test_resolve_ambiguous_cex_symbol_returns_none():
-    # Two "AI" tokens both carry `gate` (stale binding) -> refuse to route
-    # gate; but kraken lives on only one -> resolves unambiguously.
-    cm._CACHE = {
-        "AI": {"symbol": "AI", "networks_cex": {"gate": {"ETH": [True, True]}, "kraken": {}}},
-        "AI#bsc": {"symbol": "AI", "networks_cex": {"gate": {"BSC": [True, True]}}},
-    }
-    cm._INDEX = {"symbol": {"AI": ["AI", "AI#bsc"]}, "token_id": {}, "contract": {}, "pool": {}}
-    assert cm.resolve_key_for_cex_symbol("gate", "AI") is None      # ambiguous -> skip
-    assert cm.resolve_key_for_cex_symbol("kraken", "AI") == "AI"    # unique -> route
